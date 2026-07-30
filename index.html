@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1688 图搜批量寻源 - 以图搜款找货源</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<!-- 背景装饰 -->
+<div class="bg-decoration">
+  <div class="bg-circle bg-circle-1"></div>
+  <div class="bg-circle bg-circle-2"></div>
+  <div class="bg-grid"></div>
+</div>
+
+<!-- 顶部导航 -->
+<header class="header">
+  <div class="container header-inner">
+    <div class="logo">
+      <span class="logo-icon">🛒</span>
+      <span class="logo-text">1688<span class="logo-accent">图搜</span></span>
+    </div>
+    <nav class="nav">
+      <a href="#" class="nav-link active">批量寻源</a>
+      <a href="#how" class="nav-link">使用说明</a>
+      <a href="#history" class="nav-link">历史记录</a>
+      <button class="nav-link settings-btn" id="settingsBtn" title="后端设置">⚙️</button>
+    </nav>
+  </div>
+</header>
+
+<!-- 主内容区 -->
+<main class="main">
+  <div class="container">
+
+    <!-- Hero区域 -->
+    <section class="hero">
+      <div class="hero-content">
+        <div class="hero-badge">
+          <span class="badge-dot"></span>
+          <span>AI 智能图搜 · 批量找货源</span>
+        </div>
+        <h1 class="hero-title">
+          上传图片，<span class="gradient-text">一键找遍1688货源</span>
+        </h1>
+        <p class="hero-desc">
+          支持批量上传图片，自动调用1688图搜接口，快速定位同款商品源头供应商，
+          附带相似度评分，帮你找到性价比最高的货源。
+        </p>
+
+        <!-- 后端配置提示条 -->
+        <div class="api-notice" id="apiNotice">
+          <span class="notice-icon">⚠️</span>
+          <span>请先配置后端地址，点击右上角 ⚙️ 设置</span>
+        </div>
+
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <div class="hero-stat-num">1000万+</div>
+            <div class="hero-stat-label">商品数据库</div>
+          </div>
+          <div class="hero-stat-divider"></div>
+          <div class="hero-stat">
+            <div class="hero-stat-num">98%</div>
+            <div class="hero-stat-label">识别准确率</div>
+          </div>
+          <div class="hero-stat-divider"></div>
+          <div class="hero-stat">
+            <div class="hero-stat-num">批量</div>
+            <div class="hero-stat-label">多图同时搜索</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 上传区域 -->
+    <section class="upload-section" id="upload-section">
+      <div class="card upload-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span class="title-icon">📤</span>
+            批量上传图片
+          </h2>
+          <div class="card-subtitle">支持 JPG、PNG、WebP 等格式，单张最大 10MB</div>
+        </div>
+
+        <!-- 拖拽上传区 -->
+        <div class="drop-zone" id="dropZone">
+          <div class="drop-zone-inner">
+            <div class="drop-icon">
+              <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path d="M32 42V14M32 14L20 26M32 14L44 26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 34v12a6 6 0 006 6h28a6 6 0 006-6V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+              </svg>
+            </div>
+            <div class="drop-text">
+              <p class="drop-title">拖拽图片到此处，或 <span class="drop-link">点击选择文件</span></p>
+              <p class="drop-hint">支持批量选择多张图片同时上传</p>
+            </div>
+            <input type="file" id="fileInput" multiple accept="image/*" hidden>
+          </div>
+        </div>
+
+        <!-- 已上传文件列表 -->
+        <div class="file-list" id="fileList" style="display: none;">
+          <div class="file-list-header">
+            <span>已上传图片</span>
+            <span class="file-count" id="fileCount">0 张</span>
+          </div>
+          <div class="file-grid" id="fileGrid"></div>
+        </div>
+
+        <!-- 操作按钮 -->
+        <div class="upload-actions">
+          <button class="btn btn-ghost" id="clearBtn" style="display: none;">
+            <span>清空列表</span>
+          </button>
+          <button class="btn btn-primary" id="searchBtn" style="display: none;" disabled>
+            <span class="btn-icon">🔍</span>
+            <span>开始批量搜索</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 进度区域 -->
+    <section class="progress-section" id="progress-section" style="display: none;">
+      <div class="card progress-card">
+        <div class="card-header">
+          <h2 class="card-title">
+            <span class="title-icon">⏳</span>
+            搜索进度
+          </h2>
+          <div class="progress-status" id="progressStatus">准备中...</div>
+        </div>
+
+        <div class="progress-bar-wrap">
+          <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+          </div>
+          <div class="progress-text">
+            <span id="progressCurrent">0</span> / <span id="progressTotal">0</span>
+            <span class="progress-percent" id="progressPercent">0%</span>
+          </div>
+        </div>
+
+        <div class="progress-detail" id="progressDetail">
+          <div class="detail-item">
+            <span class="detail-label">当前图片</span>
+            <span class="detail-value" id="currentImage">-</span>
+          </div>
+          <div class="detail-item">
+            <span class="detail-label">已找到商品</span>
+            <span class="detail-value highlight" id="foundProducts">0</span>
+          </div>
+        </div>
+
+        <div class="progress-tip">
+          <span class="tip-icon">💡</span>
+          <span>搜索过程中请勿关闭页面，本地后端会自动操作浏览器进行图搜</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 结果区域 -->
+    <section class="result-section" id="result-section" style="display: none;">
+      <div class="result-header">
+        <div class="result-title-wrap">
+          <h2 class="result-title">
+            <span class="title-icon">📊</span>
+            搜索结果
+          </h2>
+          <div class="result-subtitle" id="resultSubtitle">搜索完成</div>
+        </div>
+        <div class="result-actions">
+          <button class="btn btn-ghost" id="exportJsonBtn">
+            <span>导出 JSON</span>
+          </button>
+          <button class="btn btn-outline" id="newSearchBtn">
+            <span>新建搜索</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 统计卡片 -->
+      <div class="stats-row" id="statsRow"></div>
+
+      <!-- 图片结果列表 -->
+      <div class="result-list" id="resultList"></div>
+    </section>
+
+    <!-- 使用说明 -->
+    <section class="how-section" id="how">
+      <h2 class="section-title">如何使用</h2>
+      <div class="how-grid">
+        <div class="how-item">
+          <div class="how-num">01</div>
+          <h3>启动后端</h3>
+          <p>在本地运行 Python 后端服务，确保浏览器已安装 Playwright</p>
+        </div>
+        <div class="how-item">
+          <div class="how-num">02</div>
+          <h3>配置地址</h3>
+          <p>点击右上角设置按钮，填入后端地址（默认 http://localhost:5000）</p>
+        </div>
+        <div class="how-item">
+          <div class="how-num">03</div>
+          <h3>上传搜索</h3>
+          <p>上传商品图片，点击开始搜索，等待自动图搜完成</p>
+        </div>
+        <div class="how-item">
+          <div class="how-num">04</div>
+          <h3>查看结果</h3>
+          <p>按相似度排序查看结果，点击跳转到1688详情页联系供应商</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- 历史记录 -->
+    <section class="history-section" id="history">
+      <h2 class="section-title">历史搜索记录</h2>
+      <div class="history-list" id="historyList">
+        <div class="empty-state">
+          <div class="empty-icon">📋</div>
+          <p>暂无历史记录</p>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</main>
+
+<!-- 底部 -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <div class="logo">
+          <span class="logo-icon">🛒</span>
+          <span class="logo-text">1688<span class="logo-accent">图搜</span></span>
+        </div>
+        <p class="footer-desc">批量图搜找货源，助力电商选品</p>
+      </div>
+      <div class="footer-bottom">
+        <p>数据来源：1688.com · 仅供参考</p>
+      </div>
+    </div>
+  </div>
+</footer>
+
+<!-- 设置弹窗 -->
+<div class="settings-modal" id="settingsModal" style="display: none;">
+  <div class="settings-overlay" id="settingsOverlay"></div>
+  <div class="settings-panel">
+    <div class="settings-header">
+      <h3>后端设置</h3>
+      <button class="settings-close" id="settingsClose">×</button>
+    </div>
+    <div class="settings-body">
+      <div class="form-group">
+        <label>后端 API 地址</label>
+        <input type="text" id="apiBaseInput" placeholder="http://localhost:5000">
+        <p class="form-hint">
+          本地运行请填 <code>http://localhost:5000</code><br>
+          需确保后端服务已启动
+        </p>
+      </div>
+      <div class="form-group">
+        <label>连接状态</label>
+        <div class="connection-status" id="connectionStatus">
+          <span class="status-dot"></span>
+          <span class="status-text">未检测</span>
+        </div>
+      </div>
+    </div>
+    <div class="settings-footer">
+      <button class="btn btn-ghost" id="settingsCancel">取消</button>
+      <button class="btn btn-primary" id="settingsSave">
+        <span>保存设置</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- 模板：商品卡片 -->
+<template id="productCardTemplate">
+  <div class="product-card">
+    <div class="product-img">
+      <div class="similarity-badge"></div>
+      <img src="" alt="" loading="lazy">
+      <div class="similarity-bar"></div>
+    </div>
+    <div class="product-body">
+      <div class="product-title"></div>
+      <div class="product-price">
+        <span class="price-text"></span>
+        <span class="sim-text"></span>
+      </div>
+      <div class="product-shop"></div>
+    </div>
+  </div>
+</template>
+
+<script src="js/app.js"></script>
+</body>
+</html>
