@@ -590,9 +590,10 @@
       simText = '';  // 价格旁边不展示相似度
     }
 
-    // 商品图片
+    // 商品图片 - 通过后端代理加载，解决防盗链问题
+    const imgUrl = item.image ? (getApiBase() + '/img-proxy?url=' + encodeURIComponent(item.image)) : '';
     const imgHtml = item.image
-      ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
+      ? `<img src="${imgUrl}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
       : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
 
     card.innerHTML = `
