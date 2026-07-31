@@ -3,32 +3,6 @@
    设计风格：现代极简 + 橙色品牌色
    ============================================ */
 
-/* ===== GitHub Pages 提示条 ===== */
-.api-notice {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 20px;
-  background: linear-gradient(135deg, #fff3e8, #ffe8d6);
-  border: 1px solid #ffd4b8;
-  border-radius: 100px;
-  font-size: 13px;
-  font-weight: 500;
-  color: #e55d00;
-  margin-bottom: 24px;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.api-notice:hover {
-  background: linear-gradient(135deg, #ffe8d6, #ffd4b8);
-  transform: translateY(-1px);
-}
-
-.notice-icon {
-  font-size: 16px;
-}
-
 /* ===== CSS 变量 ===== */
 :root {
   --primary: #ff6a00;
