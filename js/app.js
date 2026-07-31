@@ -7,7 +7,7 @@
 
   // ====== API 配置 ======
   // 从 localStorage 读取后端地址，默认使用当前域名（同域部署时）
-  const DEFAULT_API_BASE = '';
+  const DEFAULT_API_BASE = 'https://e216772.r5.cpolar.top';
   const getApiBase = () => {
     return localStorage.getItem('apiBase') || DEFAULT_API_BASE;
   };
@@ -63,8 +63,19 @@
     connectionStatus: document.getElementById('connectionStatus'),
   };
 
+  // ====== 从URL参数读取配置 ======
+  function readUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const apiBaseFromUrl = params.get('api') || params.get('backend') || params.get('server');
+    if (apiBaseFromUrl) {
+      setApiBase(apiBaseFromUrl);
+      console.log('已从URL参数设置后端地址:', apiBaseFromUrl);
+    }
+  }
+
   // ====== 初始化 ======
   function init() {
+    readUrlParams();
     setupDragAndDrop();
     setupFileInput();
     setupButtons();
@@ -216,19 +227,6 @@
     el.settingsClose.addEventListener('click', closeSettings);
     el.settingsCancel.addEventListener('click', closeSettings);
     el.settingsSave.addEventListener('click', saveSettings);
-
-    // 提示条点击打开设置
-    const apiNotice = document.getElementById('apiNotice');
-    if (apiNotice) {
-      apiNotice.addEventListener('click', openSettings);
-    }
-
-    // 如果没有配置后端地址，首次打开自动弹出设置
-    if (!getApiBase()) {
-      setTimeout(() => {
-        openSettings();
-      }, 500);
-    }
 
     // ESC关闭
     document.addEventListener('keydown', (e) => {
@@ -582,25 +580,14 @@
 
     if (item.similarity !== undefined && item.similarity !== null) {
       const sim = item.similarity;
-      displaySim = sim.toFixed(3);
+      displaySim = sim.toFixed(2);  // 保留2位小数
 
-      // 进度条：值越小越相似
-      const simPercent = Math.max(0, Math.min(100, (2 - sim) / 2 * 100));
-
-      let badgeColor = 'linear-gradient(135deg, #00b894, #00a884)';
-      let barColor = 'linear-gradient(90deg, #00b894, #55efc4)';
-      if (sim > 0.5) {
-        badgeColor = 'linear-gradient(135deg, #ff6a00, #ff4400)';
-        barColor = 'linear-gradient(90deg, #ff6a00, #ffaa00)';
-      }
-      if (sim > 1) {
-        badgeColor = 'linear-gradient(135deg, #999, #777)';
-        barColor = 'linear-gradient(90deg, #bbb, #ddd)';
-      }
+      // 徽章颜色：橙色背景
+      const badgeColor = '#ff6a00';
 
       simBadge = `<div class="similarity-badge" style="background: ${badgeColor}">${displaySim}</div>`;
-      simBar = `<div class="similarity-bar" style="width: ${simPercent}%; background: ${barColor}"></div>`;
-      simText = `<span class="sim-text">${displaySim}</span>`;
+      simBar = '';  // 去掉底部进度条
+      simText = '';  // 价格旁边不展示相似度
     }
 
     // 商品图片
