@@ -49,13 +49,6 @@
           支持批量上传图片，自动调用1688图搜接口，快速定位同款商品源头供应商，
           附带相似度评分，帮你找到性价比最高的货源。
         </p>
-
-        <!-- 后端配置提示条 -->
-        <div class="api-notice" id="apiNotice">
-          <span class="notice-icon">🔧</span>
-          <span>首次使用请先 <a href="https://localhost:5443/api/tasks" target="_blank" style="color:inherit;text-decoration:underline;">点此信任证书</a>，然后配置后端地址</span>
-        </div>
-
         <div class="hero-stats">
           <div class="hero-stat">
             <div class="hero-stat-num">1000万+</div>
@@ -159,7 +152,7 @@
 
         <div class="progress-tip">
           <span class="tip-icon">💡</span>
-          <span>搜索过程中请勿关闭页面，本地后端会自动操作浏览器进行图搜</span>
+          <span>搜索过程中请勿关闭页面，浏览器会自动操作1688进行图片搜索</span>
         </div>
       </div>
     </section>
@@ -197,23 +190,23 @@
       <div class="how-grid">
         <div class="how-item">
           <div class="how-num">01</div>
-          <h3>启动后端</h3>
-          <p>在本地运行 Python 后端服务，确保浏览器已安装 Playwright</p>
+          <h3>上传图片</h3>
+          <p>拖拽或点击上传需要找货源的商品图片，支持批量上传多张图片</p>
         </div>
         <div class="how-item">
           <div class="how-num">02</div>
-          <h3>配置地址</h3>
-          <p>点击右上角设置按钮，填入后端地址（默认 http://localhost:5000）</p>
+          <h3>开始搜索</h3>
+          <p>点击"开始批量搜索"按钮，系统会自动打开浏览器进行图搜</p>
         </div>
         <div class="how-item">
           <div class="how-num">03</div>
-          <h3>上传搜索</h3>
-          <p>上传商品图片，点击开始搜索，等待自动图搜完成</p>
+          <h3>查看结果</h3>
+          <p>搜索完成后查看结果列表，按相似度排序，找到最匹配的货源</p>
         </div>
         <div class="how-item">
           <div class="how-num">04</div>
-          <h3>查看结果</h3>
-          <p>按相似度排序查看结果，点击跳转到1688详情页联系供应商</p>
+          <h3>联系供应商</h3>
+          <p>点击商品卡片跳转到1688详情页，直接联系供应商洽谈采购</p>
         </div>
       </div>
     </section>
@@ -261,10 +254,10 @@
     <div class="settings-body">
       <div class="form-group">
         <label>后端 API 地址</label>
-        <input type="text" id="apiBaseInput" placeholder="https://localhost:5443">
+        <input type="text" id="apiBaseInput" placeholder="https://e216772.r5.cpolar.top">
         <p class="form-hint">
-          GitHub Pages 请填 <code>https://localhost:5443</code><br>
-          需先<a href="https://localhost:5443/api/tasks" target="_blank" style="color:var(--primary)">访问此地址</a>信任证书
+          本地运行请填 <code>http://localhost:5000</code><br>
+          同域部署留空即可
         </p>
       </div>
       <div class="form-group">
