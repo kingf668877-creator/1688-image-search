@@ -2034,3 +2034,190 @@ img {
     grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   }
 }
+
+/* ===== 上传接口耗时 ===== */
+.upload-timing {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  margin-top: 12px;
+  background: linear-gradient(135deg, #f0f9f0, #f5fff5);
+  border: 1px solid #c8e6c9;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #2e7d32;
+}
+
+.upload-timing .timing-icon {
+  font-size: 16px;
+}
+
+.upload-timing .timing-label {
+  font-weight: 500;
+}
+
+.upload-timing .timing-value {
+  font-weight: 700;
+  color: #1b5e20;
+}
+
+/* ===== 接口总耗时卡片 ===== */
+.stat-card.timing-card {
+  background: linear-gradient(135deg, #fff3e0, #ffe0b2);
+  border-color: #ffb74d;
+}
+
+.stat-card.timing-card .stat-num {
+  color: #e65100;
+  font-size: 20px;
+}
+
+/* ===== 商品标题和店铺链接样式 ===== */
+a.mini-product-title,
+a.product-title {
+  text-decoration: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: color 0.2s;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+a.mini-product-title:hover,
+a.product-title:hover {
+  color: #ff6a00;
+}
+
+a.mini-product-shop,
+a.product-shop {
+  text-decoration: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: color 0.2s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: block;
+}
+
+a.mini-product-shop:hover,
+a.product-shop:hover {
+  color: #1976d2;
+  text-decoration: underline;
+}
+
+/* ===== 分页组件 ===== */
+.pagination-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 16px 20px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.pagination-info {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.pagination-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.page-btn {
+  min-width: 34px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-primary);
+  transition: all 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: #ff6a00;
+  color: #ff6a00;
+  background: #fff8f0;
+}
+
+.page-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.page-current {
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 500;
+}
+
+.page-current span {
+  color: #ff6a00;
+  font-weight: 700;
+}
+
+.page-jump {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.page-jump-input {
+  width: 50px;
+  height: 34px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  text-align: center;
+  font-size: 13px;
+  outline: none;
+}
+
+.page-jump-input:focus {
+  border-color: #ff6a00;
+}
+
+.page-size-select {
+  height: 34px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  outline: none;
+  padding: 0 8px;
+  background: #fff;
+}
+
+.page-size-select:focus {
+  border-color: #ff6a00;
+}
+
+/* 分页响应式 */
+@media (max-width: 768px) {
+  .pagination-wrap {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .pagination-controls {
+    justify-content: center;
+  }
+}
