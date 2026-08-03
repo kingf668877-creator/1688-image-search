@@ -49,6 +49,13 @@
           支持批量上传图片，自动调用1688图搜接口，快速定位同款商品源头供应商，
           附带相似度评分，帮你找到性价比最高的货源。
         </p>
+
+        <!-- 后端配置提示条 -->
+        <div class="api-notice" id="apiNotice">
+          <span class="notice-icon">🔧</span>
+          <span>首次使用请先 <a href="https://localhost:5443/api/tasks" target="_blank" style="color:inherit;text-decoration:underline;">点此信任证书</a>，然后配置后端地址</span>
+        </div>
+
         <div class="hero-stats">
           <div class="hero-stat">
             <div class="hero-stat-num">1000万+</div>
@@ -76,36 +83,101 @@
             <span class="title-icon">📤</span>
             批量上传图片
           </h2>
-          <div class="card-subtitle">支持 JPG、PNG、WebP 等格式，单张最大 10MB</div>
+          <div class="card-subtitle">支持 JPG、PNG、WebP 等格式，不限数量与大小</div>
         </div>
 
-        <!-- 拖拽上传区 -->
-        <div class="drop-zone" id="dropZone">
-          <div class="drop-zone-inner">
-            <div class="drop-icon">
-              <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M32 42V14M32 14L20 26M32 14L44 26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M12 34v12a6 6 0 006 6h28a6 6 0 006-6V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
-              </svg>
+        <!-- 上传方式 Tab 切换 -->
+        <div class="upload-tabs" id="uploadTabs">
+          <button class="upload-tab active" data-tab="batch">
+            <span class="tab-icon">🖼️</span>
+            <span>图片批量上传</span>
+          </button>
+          <button class="upload-tab" data-tab="link">
+            <span class="tab-icon">🔗</span>
+            <span>图片链接批量上传</span>
+          </button>
+          <button class="upload-tab" data-tab="table">
+            <span class="tab-icon">📋</span>
+            <span>图片表格批量上传</span>
+          </button>
+        </div>
+
+        <!-- 方式一：图片批量上传（拖拽 + 文件选择） -->
+        <div class="upload-panel active" id="panel-batch">
+          <div class="drop-zone" id="dropZone">
+            <div class="drop-zone-inner">
+              <div class="drop-icon">
+                <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M32 42V14M32 14L20 26M32 14L44 26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M12 34v12a6 6 0 006 6h28a6 6 0 006-6V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                </svg>
+              </div>
+              <div class="drop-text">
+                <p class="drop-title">拖拽图片到此处，或 <span class="drop-link">点击选择文件</span></p>
+                <p class="drop-hint">支持批量选择多张图片同时上传，不限数量</p>
+              </div>
+              <input type="file" id="fileInput" multiple accept="image/*" hidden>
             </div>
-            <div class="drop-text">
-              <p class="drop-title">拖拽图片到此处，或 <span class="drop-link">点击选择文件</span></p>
-              <p class="drop-hint">支持批量选择多张图片同时上传</p>
+          </div>
+
+          <!-- 已上传文件列表 -->
+          <div class="file-list" id="fileList" style="display: none;">
+            <div class="file-list-header">
+              <span>已上传图片</span>
+              <span class="file-count" id="fileCount">0 张</span>
             </div>
-            <input type="file" id="fileInput" multiple accept="image/*" hidden>
+            <div class="file-grid" id="fileGrid"></div>
           </div>
         </div>
 
-        <!-- 已上传文件列表 -->
-        <div class="file-list" id="fileList" style="display: none;">
-          <div class="file-list-header">
-            <span>已上传图片</span>
-            <span class="file-count" id="fileCount">0 张</span>
+        <!-- 方式二：图片链接批量上传 -->
+        <div class="upload-panel" id="panel-link">
+          <div class="link-upload-wrap">
+            <p class="panel-hint">每行粘贴一个图片URL地址，支持 http/https 链接，不限数量</p>
+            <textarea id="urlTextarea" class="url-textarea" placeholder="https://example.com/img1.jpg&#10;https://example.com/img2.png&#10;https://example.com/img3.webp&#10;..." rows="8"></textarea>
+            <div class="link-actions">
+              <label class="btn btn-ghost">
+                <span>📄 从文本文件导入</span>
+                <input type="file" id="urlFileInput" accept=".txt,.csv" hidden>
+              </label>
+              <button class="btn btn-ghost" id="clearUrlBtn">
+                <span>清空</span>
+              </button>
+              <button class="btn btn-outline" id="previewUrlBtn">
+                <span>预览链接</span>
+              </button>
+            </div>
+            <!-- URL 预览网格 -->
+            <div class="url-preview" id="urlPreview" style="display: none;">
+              <div class="file-list-header">
+                <span>链接预览</span>
+                <span class="file-count" id="urlCount">0 条</span>
+              </div>
+              <div class="file-grid" id="urlGrid"></div>
+            </div>
           </div>
-          <div class="file-grid" id="fileGrid"></div>
         </div>
 
-        <!-- 操作按钮 -->
+        <!-- 方式三：图片表格批量上传 -->
+        <div class="upload-panel" id="panel-table">
+          <div class="table-upload-wrap">
+            <p class="panel-hint">每个单元格上传一张图片，点击单元格选择文件或拖入图片，可任意添加行数</p>
+            <div class="table-grid" id="tableGrid">
+              <!-- 表格行由 JS 动态生成 -->
+            </div>
+            <div class="table-actions">
+              <button class="btn btn-outline" id="addTableRowBtn">
+                <span>+ 添加一行</span>
+              </button>
+              <button class="btn btn-ghost" id="clearTableBtn">
+                <span>清空全部</span>
+              </button>
+              <span class="table-count" id="tableCount">0 张图片</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 操作按钮（三种方式共用） -->
         <div class="upload-actions">
           <button class="btn btn-ghost" id="clearBtn" style="display: none;">
             <span>清空列表</span>
@@ -152,7 +224,7 @@
 
         <div class="progress-tip">
           <span class="tip-icon">💡</span>
-          <span>搜索过程中请勿关闭页面，浏览器会自动操作1688进行图片搜索</span>
+          <span>搜索过程中请勿关闭页面，本地后端会自动操作浏览器进行图搜</span>
         </div>
       </div>
     </section>
@@ -190,23 +262,23 @@
       <div class="how-grid">
         <div class="how-item">
           <div class="how-num">01</div>
-          <h3>上传图片</h3>
-          <p>拖拽或点击上传需要找货源的商品图片，支持批量上传多张图片</p>
+          <h3>启动后端</h3>
+          <p>在本地运行 Python 后端服务，确保浏览器已安装 Playwright</p>
         </div>
         <div class="how-item">
           <div class="how-num">02</div>
-          <h3>开始搜索</h3>
-          <p>点击"开始批量搜索"按钮，系统会自动打开浏览器进行图搜</p>
+          <h3>配置地址</h3>
+          <p>点击右上角设置按钮，填入后端地址（默认 http://localhost:5000）</p>
         </div>
         <div class="how-item">
           <div class="how-num">03</div>
-          <h3>查看结果</h3>
-          <p>搜索完成后查看结果列表，按相似度排序，找到最匹配的货源</p>
+          <h3>上传搜索</h3>
+          <p>上传商品图片，点击开始搜索，等待自动图搜完成</p>
         </div>
         <div class="how-item">
           <div class="how-num">04</div>
-          <h3>联系供应商</h3>
-          <p>点击商品卡片跳转到1688详情页，直接联系供应商洽谈采购</p>
+          <h3>查看结果</h3>
+          <p>按相似度排序查看结果，点击跳转到1688详情页联系供应商</p>
         </div>
       </div>
     </section>
@@ -254,10 +326,11 @@
     <div class="settings-body">
       <div class="form-group">
         <label>后端 API 地址</label>
-        <input type="text" id="apiBaseInput" placeholder="https://e216772.r5.cpolar.top">
+        <input type="text" id="apiBaseInput" placeholder="https://macintosh-executives-til-performer.trycloudflare.com">
         <p class="form-hint">
-          本地运行请填 <code>http://localhost:5000</code><br>
-          同域部署留空即可
+          默认公网后端：<br>
+          <code>https://macintosh-executives-til-performer.trycloudflare.com</code><br>
+          网页首次打开会自动使用该地址，无需手动设置。
         </p>
       </div>
       <div class="form-group">
@@ -295,6 +368,26 @@
     </div>
   </div>
 </template>
+
+<!-- 查看更多结果弹窗 -->
+<div class="result-modal" id="resultModal" style="display: none;">
+  <div class="result-modal-overlay" id="resultModalOverlay"></div>
+  <div class="result-modal-panel">
+    <div class="result-modal-header">
+      <div class="result-modal-title-wrap">
+        <img class="result-modal-thumb" id="resultModalThumb" src="" alt="">
+        <div>
+          <h3 id="resultModalTitle">图片搜索结果</h3>
+          <div class="result-modal-sub" id="resultModalSub">共 0 个结果</div>
+        </div>
+      </div>
+      <button class="result-modal-close" id="resultModalClose">×</button>
+    </div>
+    <div class="result-modal-body">
+      <div class="product-grid" id="resultModalGrid"></div>
+    </div>
+  </div>
+</div>
 
 <script src="js/app.js"></script>
 </body>
