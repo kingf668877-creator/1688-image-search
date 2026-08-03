@@ -1,15 +1,25 @@
 /* ============================================
    1688 图搜批量寻源 - 前端交互逻辑
+   支持三种上传方式 + 列表式结果展示
    ============================================ */
 
 (function () {
   'use strict';
 
   // ====== API 配置 ======
-  // 从 localStorage 读取后端地址，默认使用当前域名（同域部署时）
-  const DEFAULT_API_BASE = 'https://suites-traditional-bay-pushing.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://macintosh-executives-til-performer.trycloudflare.com';
+  const LEGACY_API_BASES = new Set([
+    'https://dianleida.pythonanywhere.com',
+    'https://e216772.r5.cpolar.top',
+    'https://suites-traditional-bay-pushing.trycloudflare.com',
+  ]);
   const getApiBase = () => {
-    return localStorage.getItem('apiBase') || DEFAULT_API_BASE;
+    const saved = localStorage.getItem('apiBase');
+    if (!saved || LEGACY_API_BASES.has(saved)) {
+      if (saved) localStorage.setItem('apiBase', DEFAULT_API_BASE);
+      return DEFAULT_API_BASE;
+    }
+    return saved;
   };
   const setApiBase = (url) => {
     if (url) {
@@ -20,23 +30,55 @@
   };
   const api = (path) => getApiBase() + path;
 
+  // 列表行中最多直接展示的商品数，超出则点"查看更多"
+  const ROW_PREVIEW_LIMIT = 5;
+
   // ====== 全局状态 ======
   const state = {
-    files: [],          // 已选择的文件列表
-    taskId: null,       // 当前任务ID
-    pollingTimer: null, // 轮询定时器
-    results: null,      // 搜索结果
+    currentTab: 'batch',   // batch | link | table
+    files: [],             // 批量上传：已选择的文件列表
+    tableFiles: [],        // 表格上传：每行的文件（按行号索引）
+    tableRows: 0,          // 表格当前行数
+    taskId: null,
+    pollingTimer: null,
+    results: null,
   };
 
   // ====== DOM 元素 ======
   const el = {
+    // Tab
+    uploadTabs: document.getElementById('uploadTabs'),
+    panelBatch: document.getElementById('panel-batch'),
+    panelLink: document.getElementById('panel-link'),
+    panelTable: document.getElementById('panel-table'),
+
+    // 批量上传
     dropZone: document.getElementById('dropZone'),
     fileInput: document.getElementById('fileInput'),
     fileList: document.getElementById('fileList'),
     fileGrid: document.getElementById('fileGrid'),
     fileCount: document.getElementById('fileCount'),
+
+    // 链接上传
+    urlTextarea: document.getElementById('urlTextarea'),
+    urlFileInput: document.getElementById('urlFileInput'),
+    clearUrlBtn: document.getElementById('clearUrlBtn'),
+    previewUrlBtn: document.getElementById('previewUrlBtn'),
+    urlPreview: document.getElementById('urlPreview'),
+    urlCount: document.getElementById('urlCount'),
+    urlGrid: document.getElementById('urlGrid'),
+
+    // 表格上传
+    tableGrid: document.getElementById('tableGrid'),
+    addTableRowBtn: document.getElementById('addTableRowBtn'),
+    clearTableBtn: document.getElementById('clearTableBtn'),
+    tableCount: document.getElementById('tableCount'),
+
+    // 公共按钮
     clearBtn: document.getElementById('clearBtn'),
     searchBtn: document.getElementById('searchBtn'),
+
+    // 进度
     progressSection: document.getElementById('progress-section'),
     progressStatus: document.getElementById('progressStatus'),
     progressFill: document.getElementById('progressFill'),
@@ -45,6 +87,8 @@
     progressPercent: document.getElementById('progressPercent'),
     currentImage: document.getElementById('currentImage'),
     foundProducts: document.getElementById('foundProducts'),
+
+    // 结果
     resultSection: document.getElementById('result-section'),
     resultSubtitle: document.getElementById('resultSubtitle'),
     statsRow: document.getElementById('statsRow'),
@@ -52,7 +96,17 @@
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     newSearchBtn: document.getElementById('newSearchBtn'),
     historyList: document.getElementById('historyList'),
-    productCardTemplate: document.getElementById('productCardTemplate'),
+
+    // 查看更多弹窗
+    resultModal: document.getElementById('resultModal'),
+    resultModalOverlay: document.getElementById('resultModalOverlay'),
+    resultModalClose: document.getElementById('resultModalClose'),
+    resultModalThumb: document.getElementById('resultModalThumb'),
+    resultModalTitle: document.getElementById('resultModalTitle'),
+    resultModalSub: document.getElementById('resultModalSub'),
+    resultModalGrid: document.getElementById('resultModalGrid'),
+
+    // 设置
     settingsBtn: document.getElementById('settingsBtn'),
     settingsModal: document.getElementById('settingsModal'),
     settingsOverlay: document.getElementById('settingsOverlay'),
@@ -63,29 +117,52 @@
     connectionStatus: document.getElementById('connectionStatus'),
   };
 
-  // ====== 从URL参数读取配置 ======
-  function readUrlParams() {
-    const params = new URLSearchParams(window.location.search);
-    const apiBaseFromUrl = params.get('api') || params.get('backend') || params.get('server');
-    if (apiBaseFromUrl) {
-      setApiBase(apiBaseFromUrl);
-      console.log('已从URL参数设置后端地址:', apiBaseFromUrl);
-    }
-  }
-
   // ====== 初始化 ======
   function init() {
-    readUrlParams();
+    setupTabs();
     setupDragAndDrop();
     setupFileInput();
+    setupUrlUpload();
+    setupTableUpload();
     setupButtons();
     setupSettings();
+    setupResultModal();
     loadHistory();
+    // 初始添加 3 行表格
+    addTableRow();
+    addTableRow();
+    addTableRow();
+    updateButtons();
   }
 
-  // ====== 拖拽上传 ======
+  // ====== Tab 切换 ======
+  function setupTabs() {
+    if (!el.uploadTabs) return;
+    el.uploadTabs.addEventListener('click', (e) => {
+      const tab = e.target.closest('.upload-tab');
+      if (!tab) return;
+      const tabName = tab.dataset.tab;
+      switchTab(tabName);
+    });
+  }
+
+  function switchTab(tabName) {
+    state.currentTab = tabName;
+    // 切换按钮高亮
+    el.uploadTabs.querySelectorAll('.upload-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tabName);
+    });
+    // 切换面板
+    el.panelBatch.classList.toggle('active', tabName === 'batch');
+    el.panelLink.classList.toggle('active', tabName === 'link');
+    el.panelTable.classList.toggle('active', tabName === 'table');
+    updateButtons();
+  }
+
+  // ====== 拖拽上传（批量方式） ======
   function setupDragAndDrop() {
     const dropZone = el.dropZone;
+    if (!dropZone) return;
 
     dropZone.addEventListener('click', () => {
       el.fileInput.click();
@@ -104,67 +181,55 @@
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
-
       const files = Array.from(e.dataTransfer.files).filter(f =>
         f.type.startsWith('image/')
       );
-
       if (files.length > 0) {
         addFiles(files);
       }
     });
   }
 
-  // ====== 文件选择 ======
   function setupFileInput() {
     el.fileInput.addEventListener('change', (e) => {
       const files = Array.from(e.target.files);
       if (files.length > 0) {
         addFiles(files);
       }
-      // 清空input，允许重复选择相同文件
       el.fileInput.value = '';
     });
   }
 
-  // ====== 添加文件 ======
   function addFiles(newFiles) {
     for (const file of newFiles) {
-      // 检查是否已存在（按文件名）
       const exists = state.files.some(f => f.name === file.name && f.size === file.size);
       if (!exists) {
         state.files.push(file);
       }
     }
-
     renderFileList();
     updateButtons();
   }
 
-  // ====== 移除文件 ======
   function removeFile(index) {
     state.files.splice(index, 1);
     renderFileList();
     updateButtons();
   }
 
-  // ====== 清空文件 ======
   function clearFiles() {
     state.files = [];
     renderFileList();
     updateButtons();
   }
 
-  // ====== 渲染文件列表 ======
   function renderFileList() {
     if (state.files.length === 0) {
       el.fileList.style.display = 'none';
       return;
     }
-
     el.fileList.style.display = 'block';
     el.fileCount.textContent = `${state.files.length} 张`;
-
     el.fileGrid.innerHTML = '';
 
     state.files.forEach((file, index) => {
@@ -173,11 +238,8 @@
 
       const img = document.createElement('img');
       img.alt = file.name;
-
       const reader = new FileReader();
-      reader.onload = (e) => {
-        img.src = e.target.result;
-      };
+      reader.onload = (e) => { img.src = e.target.result; };
       reader.readAsDataURL(file);
 
       const name = document.createElement('div');
@@ -196,39 +258,755 @@
       item.appendChild(img);
       item.appendChild(name);
       item.appendChild(removeBtn);
-
       el.fileGrid.appendChild(item);
     });
   }
 
+  // ====== 链接上传 ======
+  function setupUrlUpload() {
+    el.clearUrlBtn.addEventListener('click', () => {
+      el.urlTextarea.value = '';
+      el.urlPreview.style.display = 'none';
+      el.urlGrid.innerHTML = '';
+      updateButtons();
+    });
+
+    el.previewUrlBtn.addEventListener('click', previewUrls);
+
+    el.urlFileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        el.urlTextarea.value = ev.target.result;
+        previewUrls();
+      };
+      reader.readAsText(file);
+      el.urlFileInput.value = '';
+    });
+
+    // 输入时实时更新计数
+    el.urlTextarea.addEventListener('input', () => {
+      const urls = parseUrls();
+      if (urls.length === 0) {
+        el.urlPreview.style.display = 'none';
+      }
+      updateButtons();
+    });
+  }
+
+  function parseUrls() {
+    const text = el.urlTextarea.value.trim();
+    if (!text) return [];
+    return text.split(/\r?\n/).map(s => s.trim()).filter(s => s && /^https?:\/\//i.test(s));
+  }
+
+  function previewUrls() {
+    const urls = parseUrls();
+    if (urls.length === 0) {
+      el.urlPreview.style.display = 'none';
+      alert('未检测到有效的图片链接（需以 http:// 或 https:// 开头）');
+      return;
+    }
+    el.urlPreview.style.display = 'block';
+    el.urlCount.textContent = `${urls.length} 条`;
+    el.urlGrid.innerHTML = '';
+
+    urls.forEach((url, idx) => {
+      const item = document.createElement('div');
+      item.className = 'file-item url-item';
+      const img = document.createElement('img');
+      img.alt = `链接 ${idx + 1}`;
+      img.src = url;
+      img.onerror = () => {
+        img.style.display = 'none';
+        const fallback = document.createElement('div');
+        fallback.className = 'url-fallback';
+        fallback.textContent = '❌';
+        item.insertBefore(fallback, item.firstChild);
+      };
+      const name = document.createElement('div');
+      name.className = 'file-item-name';
+      // 只显示域名+路径前30字符
+      try {
+        const u = new URL(url);
+        name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
+      } catch {
+        name.textContent = url.slice(0, 40);
+      }
+      const removeBtn = document.createElement('div');
+      removeBtn.className = 'file-item-remove';
+      removeBtn.innerHTML = '×';
+      removeBtn.title = '移除该链接';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
+        el.urlTextarea.value = lines.join('\n');
+        previewUrls();
+      });
+
+      item.appendChild(img);
+      item.appendChild(name);
+      item.appendChild(removeBtn);
+      el.urlGrid.appendChild(item);
+    });
+
+    updateButtons();
+  }
+
+  // ====== 表格上传 ======
+  function setupTableUpload() {
+    el.addTableRowBtn.addEventListener('click', addTableRow);
+    el.clearTableBtn.addEventListener('click', clearTable);
+  }
+
+  function addTableRow() {
+    const row = document.createElement('div');
+    row.className = 'table-row';
+    row._file = null;  // 直接在 DOM 行上挂载 file 对象
+
+    const indexCell = document.createElement('div');
+    indexCell.className = 'table-row-index';
+
+    const uploadCell = document.createElement('div');
+    uploadCell.className = 'table-upload-cell';
+    uploadCell.innerHTML = `
+      <div class="table-cell-inner">
+        <div class="table-cell-icon">+</div>
+        <div class="table-cell-text">点击或拖入图片</div>
+      </div>
+      <input type="file" accept="image/*" hidden>
+    `;
+
+    const fileInput = uploadCell.querySelector('input');
+
+    // 点击触发文件选择
+    uploadCell.addEventListener('click', (e) => {
+      if (e.target.closest('.table-cell-remove')) return;
+      fileInput.click();
+    });
+
+    // 文件选择
+    fileInput.addEventListener('change', (e) => {
+      const file = e.target.files[0];
+      if (file) {
+        setTableRowFile(row, file, uploadCell);
+      }
+      fileInput.value = '';
+    });
+
+    // 拖拽
+    uploadCell.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      uploadCell.classList.add('dragover');
+    });
+    uploadCell.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      uploadCell.classList.remove('dragover');
+    });
+    uploadCell.addEventListener('drop', (e) => {
+      e.preventDefault();
+      uploadCell.classList.remove('dragover');
+      const file = e.dataTransfer.files[0];
+      if (file && file.type.startsWith('image/')) {
+        setTableRowFile(row, file, uploadCell);
+      }
+    });
+
+    const removeCell = document.createElement('div');
+    removeCell.className = 'table-row-remove';
+    removeCell.innerHTML = '×';
+    removeCell.title = '删除该行';
+    removeCell.addEventListener('click', (e) => {
+      e.stopPropagation();
+      row.remove();
+      refreshTableIndices();
+      updateTableCount();
+      updateButtons();
+    });
+
+    row.appendChild(indexCell);
+    row.appendChild(uploadCell);
+    row.appendChild(removeCell);
+    el.tableGrid.appendChild(row);
+    refreshTableIndices();
+    updateTableCount();
+    updateButtons();
+  }
+
+  function setTableRowFile(row, file, cell) {
+    row._file = file;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      cell.innerHTML = `
+        <img class="table-cell-img" src="${e.target.result}" alt="${file.name}">
+        <div class="table-cell-name">${file.name}</div>
+        <div class="table-cell-remove" title="移除">×</div>
+      `;
+      cell.classList.add('has-file');
+      // 绑定移除按钮
+      cell.addEventListener('click', (ev) => {
+        if (!ev.target.closest('.table-cell-remove')) return;
+        ev.stopPropagation();
+        row._file = null;
+        cell.classList.remove('has-file');
+        cell.innerHTML = `
+          <div class="table-cell-inner">
+            <div class="table-cell-icon">+</div>
+            <div class="table-cell-text">点击或拖入图片</div>
+          </div>
+          <input type="file" accept="image/*" hidden>
+        `;
+        const newInput = cell.querySelector('input');
+        newInput.addEventListener('change', (e2) => {
+          const f = e2.target.files[0];
+          if (f) setTableRowFile(row, f, cell);
+          newInput.value = '';
+        });
+        updateTableCount();
+        updateButtons();
+      }, { once: false });
+      updateTableCount();
+      updateButtons();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // 仅刷新行号显示，不触碰 file 数据
+  function refreshTableIndices() {
+    el.tableGrid.querySelectorAll('.table-row').forEach((row, i) => {
+      row.querySelector('.table-row-index').textContent = i + 1;
+    });
+  }
+
+  function clearTable() {
+    el.tableGrid.innerHTML = '';
+    addTableRow();
+    addTableRow();
+    addTableRow();
+    updateTableCount();
+    updateButtons();
+  }
+
+  // 遍历 DOM 行收集 file 对象
+  function getTableFiles() {
+    const files = [];
+    el.tableGrid.querySelectorAll('.table-row').forEach(row => {
+      if (row._file) files.push(row._file);
+    });
+    return files;
+  }
+
+  function updateTableCount() {
+    el.tableCount.textContent = `${getTableFiles().length} 张图片`;
+  }
+
   // ====== 更新按钮状态 ======
   function updateButtons() {
-    const hasFiles = state.files.length > 0;
+    const hasFiles = getCurrentFileCount() > 0;
     el.clearBtn.style.display = hasFiles ? 'inline-flex' : 'none';
-    el.searchBtn.style.display = hasFiles ? 'inline-flex' : 'none';
+    el.searchBtn.style.display = 'inline-flex';
     el.searchBtn.disabled = !hasFiles;
+  }
+
+  function getCurrentFileCount() {
+    if (state.currentTab === 'batch') return state.files.length;
+    if (state.currentTab === 'link') return parseUrls().length;
+    if (state.currentTab === 'table') return getTableFiles().length;
+    return 0;
   }
 
   // ====== 按钮事件 ======
   function setupButtons() {
-    el.clearBtn.addEventListener('click', clearFiles);
+    el.clearBtn.addEventListener('click', () => {
+      if (state.currentTab === 'batch') clearFiles();
+      else if (state.currentTab === 'link') {
+        el.urlTextarea.value = '';
+        el.urlPreview.style.display = 'none';
+        updateButtons();
+      } else if (state.currentTab === 'table') clearTable();
+    });
     el.searchBtn.addEventListener('click', startSearch);
     el.exportJsonBtn.addEventListener('click', exportJson);
     el.newSearchBtn.addEventListener('click', newSearch);
   }
 
+  // ====== 开始搜索 ======
+  async function startSearch() {
+    if (getCurrentFileCount() === 0) {
+      alert('请先添加图片');
+      return;
+    }
+
+    el.searchBtn.disabled = true;
+    el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
+
+    try {
+      let uploadData;
+
+      if (state.currentTab === 'link') {
+        // 链接方式：调用 /api/upload_urls
+        const urls = parseUrls();
+        const res = await fetch(api('/api/upload_urls'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls }),
+        });
+        uploadData = await res.json();
+        if (!res.ok) throw new Error(uploadData.error || 'URL上传失败');
+      } else {
+        // 批量 / 表格方式：调用 /api/upload
+        const files = state.currentTab === 'batch' ? state.files : getTableFiles();
+        const formData = new FormData();
+        files.forEach(file => formData.append('files', file));
+
+        const res = await fetch(api('/api/upload'), {
+          method: 'POST',
+          body: formData,
+        });
+        uploadData = await res.json();
+        if (!res.ok) throw new Error(uploadData.error || '上传失败');
+      }
+
+      state.taskId = uploadData.task_id;
+
+      // 若有失败链接，提示
+      if (uploadData.failed_count && uploadData.failed_count > 0) {
+        console.warn(`有 ${uploadData.failed_count} 个链接下载失败`, uploadData.failed_files);
+      }
+
+      showProgress();
+      updateProgress({
+        status: 'queued',
+        message: '任务已启动，正在初始化...',
+        current: 0,
+        total: uploadData.uploaded_count,
+      });
+
+      // 启动搜索
+      const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
+      const searchData = await searchRes.json();
+      if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
+
+      startPolling();
+    } catch (error) {
+      console.error('搜索启动失败:', error);
+      alert('启动失败: ' + error.message);
+      el.searchBtn.disabled = false;
+      el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
+    }
+  }
+
+  // ====== 进度显示 ======
+  function showProgress() {
+    el.progressSection.style.display = 'block';
+    el.resultSection.style.display = 'none';
+    document.getElementById('upload-section').scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  }
+
+  function updateProgress(data) {
+    const statusMap = {
+      'pending': '等待中',
+      'queued': '队列中',
+      'initializing': '初始化中',
+      'searching': '搜索中',
+      'completed': '已完成',
+      'failed': '失败',
+    };
+    el.progressStatus.textContent = statusMap[data.status] || data.status;
+
+    const current = data.current || 0;
+    const total = data.total || 0;
+    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+    el.progressFill.style.width = percent + '%';
+    el.progressCurrent.textContent = current;
+    el.progressTotal.textContent = total;
+    el.progressPercent.textContent = percent + '%';
+
+    if (data.message) {
+      const match = data.message.match(/正在搜索: (.+?) \(/);
+      el.currentImage.textContent = match ? match[1] : data.message;
+    }
+    if (data.results_count !== undefined) {
+      el.foundProducts.textContent = data.results_count;
+    }
+  }
+
+  function startPolling() {
+    if (state.pollingTimer) clearInterval(state.pollingTimer);
+    const poll = async () => {
+      try {
+        const res = await fetch(api(`/api/status/${state.taskId}`));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || '获取状态失败');
+        updateProgress(data);
+        if (data.status === 'completed') {
+          stopPolling();
+          loadResults();
+        } else if (data.status === 'failed') {
+          stopPolling();
+          alert('搜索失败: ' + data.message);
+          el.searchBtn.disabled = false;
+          el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
+        }
+      } catch (error) {
+        console.error('轮询失败:', error);
+      }
+    };
+    poll();
+    state.pollingTimer = setInterval(poll, 2000);
+  }
+
+  function stopPolling() {
+    if (state.pollingTimer) {
+      clearInterval(state.pollingTimer);
+      state.pollingTimer = null;
+    }
+  }
+
+  // ====== 加载结果 ======
+  async function loadResults() {
+    try {
+      const res = await fetch(api(`/api/results/${state.taskId}`));
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || '获取结果失败');
+      state.results = data;
+      renderResults(data);
+      saveToHistory(data);
+    } catch (error) {
+      console.error('加载结果失败:', error);
+      alert('加载结果失败: ' + error.message);
+    }
+  }
+
+  // ====== 渲染结果（列表方式：一行一图） ======
+  function renderResults(data) {
+    el.progressSection.style.display = 'none';
+    el.resultSection.style.display = 'block';
+
+    const totalImages = data.total_images || 0;
+    const totalProducts = data.total_products || 0;
+
+    el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
+
+    el.statsRow.innerHTML = `
+      <div class="stat-card">
+        <div class="stat-num">${totalImages}</div>
+        <div class="stat-label">搜索图片数</div>
+      </div>
+      <div class="stat-card secondary">
+        <div class="stat-num">${totalProducts}</div>
+        <div class="stat-label">找到商品数</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-num">${totalImages > 0 ? Math.round(totalProducts / totalImages) : 0}</div>
+        <div class="stat-label">平均结果/图</div>
+      </div>
+    `;
+
+    el.resultList.innerHTML = '';
+    const results = data.results || {};
+    const imageNames = Object.keys(results);
+
+    imageNames.forEach((imageName) => {
+      const imageData = results[imageName];
+      const row = createResultRow(imageName, imageData);
+      el.resultList.appendChild(row);
+    });
+
+    el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ====== 创建结果行（一行一图 + 横向商品 + 查看更多） ======
+  function createResultRow(imageName, imageData) {
+    const row = document.createElement('div');
+    row.className = 'result-row';
+
+    const items = imageData.results || [];
+    // 相似度升序：值越小越相似
+    const sortedItems = [...items].sort((a, b) => {
+      const sa = a.similarity !== undefined && a.similarity !== null ? a.similarity : 999;
+      const sb = b.similarity !== undefined && b.similarity !== null ? b.similarity : 999;
+      return sa - sb;
+    });
+
+    // 获取上传图片预览URL
+    let imageUrl = '';
+    if (state.taskId && imageData.image_name) {
+      imageUrl = api(`/uploads/${state.taskId}/${imageData.image_name}`);
+    }
+
+    const count = imageData.result_count || 0;
+
+    // === 第一列：上传的图片 ===
+    const sourceCell = document.createElement('div');
+    sourceCell.className = 'result-source';
+    sourceCell.innerHTML = `
+      <img class="result-source-img" src="${imageUrl}" alt="${imageName}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+      <div class="result-source-fallback" style="display:none;">📷</div>
+      <div class="result-source-name">${imageName}</div>
+      <div class="result-source-count ${count === 0 ? 'zero' : ''}">${count === 0 ? '无结果' : count + ' 个结果'}</div>
+    `;
+    row.appendChild(sourceCell);
+
+    // === 中间列：前 N 个商品（横向） ===
+    const productsCell = document.createElement('div');
+    productsCell.className = 'result-products';
+
+    if (sortedItems.length === 0) {
+      productsCell.innerHTML = `
+        <div class="result-empty">
+          <div class="empty-icon">🔍</div>
+          <p>未找到匹配的商品</p>
+        </div>
+      `;
+    } else {
+      const previewItems = sortedItems.slice(0, ROW_PREVIEW_LIMIT);
+      previewItems.forEach(item => {
+        productsCell.appendChild(createMiniProductCard(item));
+      });
+    }
+    row.appendChild(productsCell);
+
+    // === 最右侧：查看更多按钮 ===
+    const actionCell = document.createElement('div');
+    actionCell.className = 'result-action';
+    if (sortedItems.length > ROW_PREVIEW_LIMIT) {
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'btn btn-outline view-more-btn';
+      moreBtn.innerHTML = `<span>查看更多</span><span class="more-count">+${sortedItems.length - ROW_PREVIEW_LIMIT}</span>`;
+      moreBtn.addEventListener('click', () => {
+        openResultModal(imageName, imageUrl, sortedItems, imageData);
+      });
+      actionCell.appendChild(moreBtn);
+    } else if (sortedItems.length > 0) {
+      // 即使没超过限制，也提供"查看全部"入口
+      const moreBtn = document.createElement('button');
+      moreBtn.className = 'btn btn-ghost view-all-btn';
+      moreBtn.innerHTML = `<span>查看全部</span>`;
+      moreBtn.addEventListener('click', () => {
+        openResultModal(imageName, imageUrl, sortedItems, imageData);
+      });
+      actionCell.appendChild(moreBtn);
+    }
+    row.appendChild(actionCell);
+
+    return row;
+  }
+
+  // ====== 迷你商品卡片（用于结果行内横向展示） ======
+  function createMiniProductCard(item) {
+    const card = document.createElement('div');
+    card.className = 'mini-product-card';
+
+    // 相似度徽章（橙色背景 #ff6a00，保留2位小数）
+    let simBadge = '';
+    if (item.similarity !== undefined && item.similarity !== null) {
+      const displaySim = Number(item.similarity).toFixed(2);
+      simBadge = `<div class="similarity-badge" style="background:#ff6a00;">${displaySim}</div>`;
+    }
+
+    const imgHtml = item.image
+      ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">`
+      : '<div class="mini-img-placeholder">无图</div>';
+
+    card.innerHTML = `
+      <div class="mini-product-img">
+        ${simBadge}
+        ${imgHtml}
+      </div>
+      <div class="mini-product-body">
+        <div class="mini-product-title">${item.title || '暂无标题'}</div>
+        <div class="mini-product-price">${item.price || '面议'}</div>
+        <div class="mini-product-shop">${item.shop || ''}</div>
+      </div>
+    `;
+
+    if (item.url) {
+      card.addEventListener('click', () => window.open(item.url, '_blank'));
+    }
+    return card;
+  }
+
+  // ====== 查看更多弹窗 ======
+  function setupResultModal() {
+    el.resultModalOverlay.addEventListener('click', closeResultModal);
+    el.resultModalClose.addEventListener('click', closeResultModal);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && el.resultModal.style.display !== 'none') {
+        closeResultModal();
+      }
+    });
+  }
+
+  function openResultModal(imageName, imageUrl, sortedItems, imageData) {
+    el.resultModalThumb.src = imageUrl || '';
+    el.resultModalThumb.onerror = () => { el.resultModalThumb.style.display = 'none'; };
+    el.resultModalTitle.textContent = imageName;
+    const count = sortedItems.length;
+    const searchTime = imageData.search_time ? ` · 耗时 ${formatTime(imageData.search_time)}` : '';
+    el.resultModalSub.textContent = `共 ${count} 个结果${searchTime} · 相似度值越小越相似`;
+
+    el.resultModalGrid.innerHTML = '';
+    sortedItems.forEach(item => {
+      el.resultModalGrid.appendChild(createFullProductCard(item));
+    });
+
+    el.resultModal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeResultModal() {
+    el.resultModal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
+  // ====== 完整商品卡片（弹窗内） ======
+  function createFullProductCard(item) {
+    const card = document.createElement('div');
+    card.className = 'product-card';
+
+    // 相似度徽章（橙色 #ff6a00，保留2位小数）
+    let simBadge = '';
+    let simBar = '';
+    if (item.similarity !== undefined && item.similarity !== null) {
+      const sim = item.similarity;
+      const displaySim = Number(sim).toFixed(2);
+      // 进度条：值越小越相似
+      const simPercent = Math.max(0, Math.min(100, (2 - sim) / 2 * 100));
+      simBadge = `<div class="similarity-badge" style="background:#ff6a00;">${displaySim}</div>`;
+      simBar = `<div class="similarity-bar" style="width: ${simPercent}%; background: linear-gradient(90deg, #ff6a00, #ffaa00)"></div>`;
+    }
+
+    const imgHtml = item.image
+      ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
+      : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
+
+    card.innerHTML = `
+      <div class="product-img">
+        ${simBadge}
+        ${imgHtml}
+        ${simBar}
+      </div>
+      <div class="product-body">
+        <div class="product-title">${item.title || '暂无标题'}</div>
+        <div class="product-price">
+          <span class="price-text">${item.price || '面议'}</span>
+        </div>
+        <div class="product-shop">${item.shop || ''}</div>
+      </div>
+    `;
+
+    if (item.url) {
+      card.addEventListener('click', () => window.open(item.url, '_blank'));
+    }
+    return card;
+  }
+
+  // ====== 导出 JSON ======
+  function exportJson() {
+    if (!state.results) return;
+    const dataStr = JSON.stringify(state.results, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `1688图搜结果_${state.taskId}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ====== 新建搜索 ======
+  function newSearch() {
+    state.taskId = null;
+    state.results = null;
+    stopPolling();
+    clearFiles();
+    el.urlTextarea.value = '';
+    el.urlPreview.style.display = 'none';
+    clearTable();
+    el.resultSection.style.display = 'none';
+    el.progressSection.style.display = 'none';
+    el.searchBtn.disabled = false;
+    el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  // ====== 历史记录 ======
+  function saveToHistory(data) {
+    try {
+      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+      const record = {
+        task_id: data.task_id,
+        status: data.status,
+        total_images: data.total_images,
+        total_products: data.total_products,
+        completed_at: data.completed_at,
+        timestamp: Date.now(),
+      };
+      const filtered = history.filter(h => h.task_id !== record.task_id);
+      filtered.unshift(record);
+      localStorage.setItem('searchHistory', JSON.stringify(filtered.slice(0, 20)));
+      loadHistory();
+    } catch (e) {
+      console.error('保存历史失败:', e);
+    }
+  }
+
+  function loadHistory() {
+    try {
+      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+      if (history.length === 0) {
+        el.historyList.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📋</div>
+            <p>暂无历史记录</p>
+          </div>
+        `;
+        return;
+      }
+      el.historyList.innerHTML = '';
+      history.forEach(record => {
+        const item = document.createElement('div');
+        item.className = 'history-item';
+        const statusClass = record.status === 'completed' ? 'completed' : 'failed';
+        const statusText = record.status === 'completed' ? '已完成' : '失败';
+        item.innerHTML = `
+          <div class="history-item-icon">🔍</div>
+          <div class="history-item-info">
+            <div class="history-item-title">${record.total_images} 张图片 · ${record.total_products} 个商品</div>
+            <div class="history-item-time">${formatTime(record.completed_at)}</div>
+          </div>
+          <div class="history-item-status ${statusClass}">${statusText}</div>
+        `;
+        el.historyList.appendChild(item);
+      });
+    } catch (e) {
+      console.error('加载历史失败:', e);
+    }
+  }
+
   // ====== 设置面板 ======
   function setupSettings() {
     if (!el.settingsBtn) return;
-
-    // 打开设置
     el.settingsBtn.addEventListener('click', openSettings);
     el.settingsOverlay.addEventListener('click', closeSettings);
     el.settingsClose.addEventListener('click', closeSettings);
     el.settingsCancel.addEventListener('click', closeSettings);
     el.settingsSave.addEventListener('click', saveSettings);
 
-    // ESC关闭
+    const apiNotice = document.getElementById('apiNotice');
+    if (apiNotice) apiNotice.addEventListener('click', openSettings);
+
+    if (!getApiBase()) {
+      setTimeout(openSettings, 500);
+    }
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && el.settingsModal.style.display !== 'none') {
         closeSettings();
@@ -250,41 +1028,31 @@
     const url = el.apiBaseInput.value.trim();
     setApiBase(url);
     closeSettings();
-
-    // 显示提示
     const btn = el.settingsSave;
     const originalText = btn.innerHTML;
     btn.innerHTML = '<span>✓ 已保存</span>';
-    setTimeout(() => {
-      btn.innerHTML = originalText;
-    }, 1500);
+    setTimeout(() => { btn.innerHTML = originalText; }, 1500);
   }
 
   async function checkConnection() {
     const statusDot = el.connectionStatus.querySelector('.status-dot');
     const statusText = el.connectionStatus.querySelector('.status-text');
-
     statusDot.className = 'status-dot checking';
     statusText.textContent = '检测中...';
-
     const baseUrl = el.apiBaseInput.value.trim();
     if (!baseUrl) {
       statusDot.className = 'status-dot';
       statusText.textContent = '使用当前域名';
       return;
     }
-
     try {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 5000);
-
       const res = await fetch(baseUrl + '/api/tasks', {
         method: 'GET',
         signal: controller.signal,
       });
-
       clearTimeout(timeoutId);
-
       if (res.ok) {
         statusDot.className = 'status-dot connected';
         statusText.textContent = '连接成功';
@@ -295,438 +1063,6 @@
     } catch (error) {
       statusDot.className = 'status-dot disconnected';
       statusText.textContent = '无法连接';
-    }
-  }
-
-  // ====== 开始搜索 ======
-  async function startSearch() {
-    if (state.files.length === 0) return;
-
-    el.searchBtn.disabled = true;
-    el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
-
-    try {
-      // 1. 上传文件
-      const formData = new FormData();
-      state.files.forEach(file => {
-        formData.append('files', file);
-      });
-
-      const uploadRes = await fetch(api('/api/upload'), {
-        method: 'POST',
-        body: formData,
-      });
-
-      const uploadData = await uploadRes.json();
-
-      if (!uploadRes.ok) {
-        throw new Error(uploadData.error || '上传失败');
-      }
-
-      state.taskId = uploadData.task_id;
-
-      // 2. 显示进度区域
-      showProgress();
-      updateProgress({
-        status: 'queued',
-        message: '任务已启动，正在初始化...',
-        current: 0,
-        total: uploadData.uploaded_count,
-      });
-
-      // 3. 开始搜索
-      const searchRes = await fetch(api(`/api/search/${state.taskId}`), {
-        method: 'POST',
-      });
-
-      const searchData = await searchRes.json();
-
-      if (!searchRes.ok) {
-        throw new Error(searchData.error || '启动搜索失败');
-      }
-
-      // 4. 开始轮询进度
-      startPolling();
-
-    } catch (error) {
-      console.error('搜索启动失败:', error);
-      alert('启动失败: ' + error.message);
-      el.searchBtn.disabled = false;
-      el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
-    }
-  }
-
-  // ====== 显示进度区域 ======
-  function showProgress() {
-    el.progressSection.style.display = 'block';
-    el.resultSection.style.display = 'none';
-    document.getElementById('upload-section').scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }
-
-  // ====== 更新进度 ======
-  function updateProgress(data) {
-    const statusMap = {
-      'pending': '等待中',
-      'queued': '队列中',
-      'initializing': '初始化中',
-      'searching': '搜索中',
-      'completed': '已完成',
-      'failed': '失败',
-    };
-
-    const statusText = statusMap[data.status] || data.status;
-    el.progressStatus.textContent = statusText;
-
-    const current = data.current || 0;
-    const total = data.total || 0;
-    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-
-    el.progressFill.style.width = percent + '%';
-    el.progressCurrent.textContent = current;
-    el.progressTotal.textContent = total;
-    el.progressPercent.textContent = percent + '%';
-
-    if (data.message) {
-      // 从消息中提取当前图片名
-      const match = data.message.match(/正在搜索: (.+?) \(/);
-      if (match) {
-        el.currentImage.textContent = match[1];
-      } else {
-        el.currentImage.textContent = data.message;
-      }
-    }
-
-    if (data.results_count !== undefined) {
-      el.foundProducts.textContent = data.results_count;
-    }
-  }
-
-  // ====== 开始轮询 ======
-  function startPolling() {
-    if (state.pollingTimer) {
-      clearInterval(state.pollingTimer);
-    }
-
-    const poll = async () => {
-      try {
-        const res = await fetch(api(`/api/status/${state.taskId}`));
-        const data = await res.json();
-
-        if (!res.ok) {
-          throw new Error(data.error || '获取状态失败');
-        }
-
-        updateProgress(data);
-
-        if (data.status === 'completed') {
-          stopPolling();
-          loadResults();
-        } else if (data.status === 'failed') {
-          stopPolling();
-          alert('搜索失败: ' + data.message);
-          el.searchBtn.disabled = false;
-          el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
-        }
-      } catch (error) {
-        console.error('轮询失败:', error);
-      }
-    };
-
-    // 立即执行一次
-    poll();
-    // 每2秒轮询一次
-    state.pollingTimer = setInterval(poll, 2000);
-  }
-
-  // ====== 停止轮询 ======
-  function stopPolling() {
-    if (state.pollingTimer) {
-      clearInterval(state.pollingTimer);
-      state.pollingTimer = null;
-    }
-  }
-
-  // ====== 加载结果 ======
-  async function loadResults() {
-    try {
-      const res = await fetch(api(`/api/results/${state.taskId}`));
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || '获取结果失败');
-      }
-
-      state.results = data;
-      renderResults(data);
-      saveToHistory(data);
-
-    } catch (error) {
-      console.error('加载结果失败:', error);
-    }
-  }
-
-  // ====== 渲染结果 ======
-  function renderResults(data) {
-    el.progressSection.style.display = 'none';
-    el.resultSection.style.display = 'block';
-
-    const totalImages = data.total_images || 0;
-    const totalProducts = data.total_products || 0;
-
-    el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
-
-    // 统计卡片
-    el.statsRow.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-num">${totalImages}</div>
-        <div class="stat-label">搜索图片数</div>
-      </div>
-      <div class="stat-card secondary">
-        <div class="stat-num">${totalProducts}</div>
-        <div class="stat-label">找到商品数</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">${totalImages > 0 ? Math.round(totalProducts / totalImages) : 0}</div>
-        <div class="stat-label">平均结果/图</div>
-      </div>
-    `;
-
-    // 渲染每个图片的结果
-    el.resultList.innerHTML = '';
-
-    const results = data.results || {};
-    const imageNames = Object.keys(results);
-
-    imageNames.forEach((imageName, idx) => {
-      const imageData = results[imageName];
-      const section = createImageSection(imageName, imageData, idx);
-      el.resultList.appendChild(section);
-    });
-
-    // 滚动到结果区域
-    el.resultSection.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }
-
-  // ====== 创建图片结果区块 ======
-  function createImageSection(imageName, imageData, index) {
-    const section = document.createElement('div');
-    section.className = 'image-section';
-
-    const count = imageData.result_count || 0;
-    const countClass = count === 0 ? 'result-count zero' : 'result-count';
-    const countText = count === 0 ? '未找到结果' : `${count} 个结果`;
-
-    // 获取图片预览URL
-    let imageUrl = '';
-    if (state.taskId && imageData.image_name) {
-      imageUrl = api(`/uploads/${state.taskId}/${imageData.image_name}`);
-    }
-
-    section.innerHTML = `
-      <div class="image-header">
-        <img class="image-thumb" src="${imageUrl}" alt="${imageName}" onerror="this.style.display='none'">
-        <div class="image-info">
-          <h3>${imageName}</h3>
-          <div class="meta">搜索时间：${formatTime(imageData.search_time)} · 相似度值越小越相似</div>
-        </div>
-        <div class="${countClass}">${countText}</div>
-      </div>
-      <div class="product-grid" id="grid-${index}"></div>
-    `;
-
-    const grid = section.querySelector('.product-grid');
-    const items = imageData.results || [];
-
-    if (items.length === 0) {
-      grid.innerHTML = `
-        <div class="empty-state" style="grid-column: 1/-1;">
-          <div class="empty-icon">🔍</div>
-          <p>未找到匹配的商品</p>
-        </div>
-      `;
-    } else {
-      // 按相似度排序（值越小越相似）
-      const sortedItems = [...items].sort((a, b) => {
-        const sa = a.similarity !== undefined && a.similarity !== null ? a.similarity : 999;
-        const sb = b.similarity !== undefined && b.similarity !== null ? b.similarity : 999;
-        return sa - sb;
-      });
-
-      sortedItems.forEach(item => {
-        const card = createProductCard(item);
-        grid.appendChild(card);
-      });
-    }
-
-    return section;
-  }
-
-  // ====== 创建商品卡片 ======
-  function createProductCard(item) {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-
-    // 相似度展示
-    let simBadge = '';
-    let simBar = '';
-    let displaySim = null;
-    let simText = '';
-
-    if (item.similarity !== undefined && item.similarity !== null) {
-      const sim = item.similarity;
-      displaySim = sim.toFixed(2);  // 保留2位小数
-
-      // 徽章颜色：橙色背景
-      const badgeColor = '#ff6a00';
-
-      simBadge = `<div class="similarity-badge" style="background: ${badgeColor}">${displaySim}</div>`;
-      simBar = '';  // 去掉底部进度条
-      simText = '';  // 价格旁边不展示相似度
-    }
-
-    // 商品图片 - 通过后端代理加载，解决防盗链问题
-    const imgUrl = item.image ? (getApiBase() + '/img-proxy?url=' + encodeURIComponent(item.image)) : '';
-    const imgHtml = item.image
-      ? `<img src="${imgUrl}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
-      : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
-
-    card.innerHTML = `
-      <div class="product-img">
-        ${simBadge}
-        ${imgHtml}
-        ${simBar}
-      </div>
-      <div class="product-body">
-        <div class="product-title">${item.title || '暂无标题'}</div>
-        <div class="product-price">
-          <span class="price-text">${item.price || '面议'}</span>
-          ${simText}
-        </div>
-        <div class="product-shop">${item.shop || ''}</div>
-      </div>
-    `;
-
-    // 点击跳转到商品详情
-    if (item.url) {
-      card.addEventListener('click', () => {
-        window.open(item.url, '_blank');
-      });
-    }
-
-    return card;
-  }
-
-  // ====== 导出JSON ======
-  function exportJson() {
-    if (!state.results) return;
-
-    const dataStr = JSON.stringify(state.results, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `1688图搜结果_${state.taskId}.json`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  }
-
-  // ====== 新建搜索 ======
-  function newSearch() {
-    state.taskId = null;
-    state.results = null;
-    stopPolling();
-
-    clearFiles();
-    el.resultSection.style.display = 'none';
-    el.progressSection.style.display = 'none';
-    el.searchBtn.disabled = false;
-    el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
-
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // ====== 保存到历史记录 ======
-  function saveToHistory(data) {
-    try {
-      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
-
-      const record = {
-        task_id: data.task_id,
-        status: data.status,
-        total_images: data.total_images,
-        total_products: data.total_products,
-        completed_at: data.completed_at,
-        timestamp: Date.now(),
-      };
-
-      // 去重
-      const filtered = history.filter(h => h.task_id !== record.task_id);
-      filtered.unshift(record);
-
-      // 只保留最近20条
-      localStorage.setItem('searchHistory', JSON.stringify(filtered.slice(0, 20)));
-
-      loadHistory();
-    } catch (e) {
-      console.error('保存历史失败:', e);
-    }
-  }
-
-  // ====== 加载历史记录 ======
-  function loadHistory() {
-    try {
-      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
-
-      if (history.length === 0) {
-        el.historyList.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-icon">📋</div>
-            <p>暂无历史记录</p>
-          </div>
-        `;
-        return;
-      }
-
-      el.historyList.innerHTML = '';
-
-      history.forEach(record => {
-        const item = document.createElement('div');
-        item.className = 'history-item';
-
-        const statusClass = record.status === 'completed' ? 'completed' : 'failed';
-        const statusText = record.status === 'completed' ? '已完成' : '失败';
-
-        item.innerHTML = `
-          <div class="history-item-icon">🔍</div>
-          <div class="history-item-info">
-            <div class="history-item-title">${record.total_images} 张图片 · ${record.total_products} 个商品</div>
-            <div class="history-item-time">${formatTime(record.completed_at)}</div>
-          </div>
-          <div class="history-item-status ${statusClass}">${statusText}</div>
-        `;
-
-        item.addEventListener('click', () => {
-          if (confirm('查看此历史记录？需要重新搜索。')) {
-            // 跳转到结果页或重新搜索
-            // 这里简单提示
-            alert('历史记录功能需要服务端支持持久化存储');
-          }
-        });
-
-        el.historyList.appendChild(item);
-      });
-
-    } catch (e) {
-      console.error('加载历史失败:', e);
     }
   }
 
