@@ -188,6 +188,13 @@
             <span>开始批量搜索</span>
           </button>
         </div>
+
+        <!-- 上传接口耗时 -->
+        <div class="upload-timing" id="uploadTiming" style="display: none;">
+          <span class="timing-icon">⏱️</span>
+          <span class="timing-label">接口耗时：</span>
+          <span class="timing-value" id="uploadTimingValue">0秒</span>
+        </div>
       </div>
     </section>
 
@@ -255,6 +262,32 @@
 
       <!-- 图片结果列表 -->
       <div class="result-list" id="resultList"></div>
+
+      <!-- 分页组件 -->
+      <div class="pagination-wrap" id="paginationWrap" style="display: none;">
+        <div class="pagination-info">
+          <span id="paginationInfo">第 1-10 条，共 0 条</span>
+        </div>
+        <div class="pagination-controls">
+          <button class="page-btn" id="pageFirst" title="首页">«</button>
+          <button class="page-btn" id="pagePrev" title="上一页">‹</button>
+          <span class="page-current">
+            <span id="pageCurrentNum">1</span> / <span id="pageTotalNum">1</span>
+          </span>
+          <button class="page-btn" id="pageNext" title="下一页">›</button>
+          <button class="page-btn" id="pageLast" title="末页">»</button>
+          <span class="page-jump">
+            <input type="number" id="pageJumpInput" min="1" value="1" class="page-jump-input">
+            <button class="page-btn" id="pageJumpBtn">跳转</button>
+          </span>
+          <select id="pageSizeSelect" class="page-size-select">
+            <option value="10">10条/页</option>
+            <option value="20" selected>20条/页</option>
+            <option value="50">50条/页</option>
+            <option value="100">100条/页</option>
+          </select>
+        </div>
+      </div>
     </section>
 
     <!-- 使用说明 -->
