@@ -32,6 +32,9 @@
 
   // 列表行中最多直接展示的商品数，超出则点"查看更多"
   const ROW_PREVIEW_LIMIT = 5;
+  // 预览网格懒加载：初始渲染数量和每次增量
+  const PREVIEW_INITIAL = 30;
+  const PREVIEW_INCREMENT = 30;
 
   // ====== 全局状态 ======
   const state = {
@@ -42,6 +45,9 @@
     taskId: null,
     pollingTimer: null,
     results: null,
+    // 懒加载渲染计数
+    fileVisibleCount: PREVIEW_INITIAL,
+    urlVisibleCount: PREVIEW_INITIAL,
     // 分页状态
     pagination: {
       currentPage: 1,
@@ -230,6 +236,7 @@
         state.files.push(file);
       }
     }
+    state.fileVisibleCount = PREVIEW_INITIAL;
     renderFileList();
     updateButtons();
   }
@@ -242,6 +249,7 @@
 
   function clearFiles() {
     state.files = [];
+    state.fileVisibleCount = PREVIEW_INITIAL;
     renderFileList();
     updateButtons();
   }
@@ -255,12 +263,15 @@
     el.fileCount.textContent = `${state.files.length} 张`;
     el.fileGrid.innerHTML = '';
 
-    state.files.forEach((file, index) => {
+    // 懒加载：只渲染前 fileVisibleCount 个
+    const visible = state.files.slice(0, state.fileVisibleCount);
+    visible.forEach((file, index) => {
       const item = document.createElement('div');
       item.className = 'file-item';
 
       const img = document.createElement('img');
       img.alt = file.name;
+      img.loading = 'lazy';
       const reader = new FileReader();
       reader.onload = (e) => { img.src = e.target.result; };
       reader.readAsDataURL(file);
@@ -283,6 +294,18 @@
       item.appendChild(removeBtn);
       el.fileGrid.appendChild(item);
     });
+
+    // 如果还有更多未渲染的，显示"加载更多"按钮
+    if (state.fileVisibleCount < state.files.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.fileVisibleCount} / ${state.files.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.fileVisibleCount += PREVIEW_INCREMENT;
+        renderFileList();
+      });
+      el.fileGrid.appendChild(loadMore);
+    }
   }
 
   // ====== 链接上传 ======
@@ -291,6 +314,7 @@
       el.urlTextarea.value = '';
       el.urlPreview.style.display = 'none';
       el.urlGrid.innerHTML = '';
+      state.urlVisibleCount = PREVIEW_INITIAL;
       updateButtons();
     });
 
@@ -334,47 +358,93 @@
     el.urlPreview.style.display = 'block';
     el.urlCount.textContent = `${urls.length} 条`;
     el.urlGrid.innerHTML = '';
+    state.urlVisibleCount = PREVIEW_INITIAL;
 
-    urls.forEach((url, idx) => {
-      const item = document.createElement('div');
-      item.className = 'file-item url-item';
-      const img = document.createElement('img');
-      img.alt = `链接 ${idx + 1}`;
-      img.src = url;
-      img.onerror = () => {
-        img.style.display = 'none';
-        const fallback = document.createElement('div');
-        fallback.className = 'url-fallback';
-        fallback.textContent = '❌';
-        item.insertBefore(fallback, item.firstChild);
-      };
-      const name = document.createElement('div');
-      name.className = 'file-item-name';
-      // 只显示域名+路径前30字符
-      try {
-        const u = new URL(url);
-        name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
-      } catch {
-        name.textContent = url.slice(0, 40);
-      }
-      const removeBtn = document.createElement('div');
-      removeBtn.className = 'file-item-remove';
-      removeBtn.innerHTML = '×';
-      removeBtn.title = '移除该链接';
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
-        el.urlTextarea.value = lines.join('\n');
-        previewUrls();
-      });
-
-      item.appendChild(img);
-      item.appendChild(name);
-      item.appendChild(removeBtn);
+    // 懒加载：只渲染前 urlVisibleCount 个
+    const visible = urls.slice(0, state.urlVisibleCount);
+    visible.forEach((url, idx) => {
+      const item = createUrlPreviewItem(url, idx, urls);
       el.urlGrid.appendChild(item);
     });
 
+    // 如果还有更多未渲染的，显示"加载更多"按钮
+    if (state.urlVisibleCount < urls.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.urlVisibleCount += PREVIEW_INCREMENT;
+        previewUrlsAppend(urls);
+      });
+      el.urlGrid.appendChild(loadMore);
+    }
+
     updateButtons();
+  }
+
+  // 追加渲染更多URL预览项（不重建已有的）
+  function previewUrlsAppend(urls) {
+    // 移除旧的"加载更多"按钮
+    const oldBtn = el.urlGrid.querySelector('.load-more-btn');
+    if (oldBtn) oldBtn.remove();
+
+    const startIdx = state.urlVisibleCount - PREVIEW_INCREMENT;
+    const endIdx = Math.min(state.urlVisibleCount, urls.length);
+    for (let idx = startIdx; idx < endIdx; idx++) {
+      const item = createUrlPreviewItem(urls[idx], idx, urls);
+      el.urlGrid.appendChild(item);
+    }
+
+    if (state.urlVisibleCount < urls.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.urlVisibleCount += PREVIEW_INCREMENT;
+        previewUrlsAppend(urls);
+      });
+      el.urlGrid.appendChild(loadMore);
+    }
+  }
+
+  // 创建单个URL预览项
+  function createUrlPreviewItem(url, idx, allUrls) {
+    const item = document.createElement('div');
+    item.className = 'file-item url-item';
+    const img = document.createElement('img');
+    img.alt = `链接 ${idx + 1}`;
+    img.src = url;
+    img.loading = 'lazy';
+    img.onerror = () => {
+      img.style.display = 'none';
+      const fallback = document.createElement('div');
+      fallback.className = 'url-fallback';
+      fallback.textContent = '❌';
+      item.insertBefore(fallback, item.firstChild);
+    };
+    const name = document.createElement('div');
+    name.className = 'file-item-name';
+    try {
+      const u = new URL(url);
+      name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
+    } catch {
+      name.textContent = url.slice(0, 40);
+    }
+    const removeBtn = document.createElement('div');
+    removeBtn.className = 'file-item-remove';
+    removeBtn.innerHTML = '×';
+    removeBtn.title = '移除该链接';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
+      el.urlTextarea.value = lines.join('\n');
+      previewUrls();
+    });
+
+    item.appendChild(img);
+    item.appendChild(name);
+    item.appendChild(removeBtn);
+    return item;
   }
 
   // ====== 表格上传 ======
@@ -546,6 +616,8 @@
       else if (state.currentTab === 'link') {
         el.urlTextarea.value = '';
         el.urlPreview.style.display = 'none';
+        el.urlGrid.innerHTML = '';
+        state.urlVisibleCount = PREVIEW_INITIAL;
         updateButtons();
       } else if (state.currentTab === 'table') clearTable();
     });
@@ -561,8 +633,8 @@
       return;
     }
 
+    const totalFiles = getCurrentFileCount();
     el.searchBtn.disabled = true;
-    el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
 
     const uploadStartTime = Date.now();
 
@@ -572,23 +644,41 @@
       if (state.currentTab === 'link') {
         // 链接方式：调用 /api/upload_urls
         const urls = parseUrls();
+        // 大量URL时显示进度提示
+        if (urls.length > 50) {
+          el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${urls.length} 张图片...</span>`;
+        } else {
+          el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
+        }
+
+        // 使用 AbortController 设置超时（10分钟，适应大量图片下载）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const res = await fetch(api('/api/upload_urls'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ urls }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         uploadData = await res.json();
         if (!res.ok) throw new Error(uploadData.error || 'URL上传失败');
       } else {
         // 批量 / 表格方式：调用 /api/upload
         const files = state.currentTab === 'batch' ? state.files : getTableFiles();
+        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在上传 ${files.length} 张图片...</span>`;
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
 
+        // 文件上传超时（10分钟）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const res = await fetch(api('/api/upload'), {
           method: 'POST',
           body: formData,
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         uploadData = await res.json();
         if (!res.ok) throw new Error(uploadData.error || '上传失败');
       }
@@ -621,7 +711,11 @@
       startPolling();
     } catch (error) {
       console.error('搜索启动失败:', error);
-      alert('启动失败: ' + error.message);
+      let errMsg = error.message;
+      if (error.name === 'AbortError') {
+        errMsg = '上传超时（超过10分钟），请减少图片数量或检查网络后重试';
+      }
+      alert('启动失败: ' + errMsg);
       el.searchBtn.disabled = false;
       el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
     }
@@ -1089,6 +1183,7 @@
     clearFiles();
     el.urlTextarea.value = '';
     el.urlPreview.style.display = 'none';
+    state.urlVisibleCount = PREVIEW_INITIAL;
     clearTable();
     el.resultSection.style.display = 'none';
     el.progressSection.style.display = 'none';
