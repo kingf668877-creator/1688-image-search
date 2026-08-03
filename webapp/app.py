@@ -17,6 +17,7 @@ from urllib.parse import urlparse
 
 import urllib.request
 import urllib.error
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from flask import Flask, render_template, request, jsonify, send_from_directory, abort, Response
 from werkzeug.utils import secure_filename
 
@@ -300,19 +301,18 @@ def upload_image_urls():
     task_upload_dir = os.path.join(UPLOAD_DIR, task_id)
     os.makedirs(task_upload_dir, exist_ok=True)
 
-    uploaded_files = []
-    failed_files = []
-
     # 允许的图片扩展名
     img_exts = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'}
 
-    for i, url in enumerate(clean_urls):
+    def download_single_url(idx_url):
+        """下载单个URL的图片（线程池工作函数）"""
+        i, url = idx_url
         try:
             req = urllib.request.Request(url, headers={
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36',
                 'Referer': url,
             })
-            with urllib.request.urlopen(req, timeout=30) as response:
+            with urllib.request.urlopen(req, timeout=15) as response:
                 img_data = response.read()
 
             # 从Content-Type或URL推断扩展名
@@ -327,7 +327,6 @@ def upload_image_urls():
             elif 'bmp' in content_type:
                 ext = '.bmp'
             else:
-                # 从URL路径推断
                 parsed = urlparse(url)
                 path = parsed.path.lower()
                 for e in img_exts:
@@ -340,15 +339,42 @@ def upload_image_urls():
             with open(filepath, 'wb') as f:
                 f.write(img_data)
 
-            uploaded_files.append({
+            return {
                 'name': filename,
                 'path': filepath,
                 'size': len(img_data),
                 'url': f'/uploads/{task_id}/{filename}',
                 'source_url': url,
-            })
+            }
         except Exception as e:
-            failed_files.append({'url': url, 'error': str(e)})
+            return {'url': url, 'error': str(e), '_failed': True}
+
+    # 并发下载（最多10个线程同时下载）
+    uploaded_files = []
+    failed_files = []
+    max_workers = min(10, len(clean_urls))
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {executor.submit(download_single_url, (i, url)): i
+                   for i, url in enumerate(clean_urls)}
+        results_map = {}
+        for future in as_completed(futures):
+            idx = futures[future]
+            try:
+                result = future.result()
+                results_map[idx] = result
+            except Exception as e:
+                results_map[idx] = {'url': clean_urls[idx], 'error': str(e), '_failed': True}
+
+        # 按原始顺序整理结果
+        for i in range(len(clean_urls)):
+            r = results_map.get(i)
+            if r and r.get('_failed'):
+                failed_files.append({'url': r.get('url', clean_urls[i]), 'error': r.get('error', '未知错误')})
+            elif r:
+                uploaded_files.append(r)
+
+    print(f"[上传完成] {task_id}: 成功 {len(uploaded_files)}/{len(clean_urls)}, 失败 {len(failed_files)}")
 
     # 初始化任务
     tasks[task_id] = {
