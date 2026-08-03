@@ -277,8 +277,8 @@ def upload_images():
 @app.route('/api/upload_urls', methods=['POST'])
 def upload_image_urls():
     """
-    通过图片URL批量上传
-    接收JSON: {"urls": ["url1", "url2", ...]}
+    通过图片URL批量上传（支持增量上传）
+    接收JSON: {"urls": ["url1", "url2", ...], "task_id": "可选，增量上传时传入已有task_id"}
     下载图片并入库，返回任务ID和已上传的图片列表
     """
     data = request.get_json(silent=True) or {}
@@ -297,8 +297,20 @@ def upload_image_urls():
     if not clean_urls:
         return jsonify({'error': 'URL列表为空'}), 400
 
-    task_id = generate_task_id()
-    task_upload_dir = os.path.join(UPLOAD_DIR, task_id)
+    # 支持增量上传：如果传入了task_id，则追加到已有任务
+    existing_task_id = data.get('task_id')
+    is_incremental = False
+    existing_uploaded_count = 0
+
+    if existing_task_id and existing_task_id in tasks:
+        is_incremental = True
+        task_id = existing_task_id
+        existing_uploaded_count = len(tasks[task_id].get('uploaded_files', []))
+        task_upload_dir = tasks[task_id].get('upload_dir', os.path.join(UPLOAD_DIR, task_id))
+    else:
+        task_id = generate_task_id()
+        task_upload_dir = os.path.join(UPLOAD_DIR, task_id)
+
     os.makedirs(task_upload_dir, exist_ok=True)
 
     # 允许的图片扩展名
@@ -334,7 +346,9 @@ def upload_image_urls():
                         ext = e
                         break
 
-            filename = f"url_{i+1:04d}{ext}"
+            # 文件编号使用全局偏移，避免增量上传时文件名冲突
+            file_num = existing_uploaded_count + i + 1
+            filename = f"url_{file_num:04d}{ext}"
             filepath = os.path.join(task_upload_dir, filename)
             with open(filepath, 'wb') as f:
                 f.write(img_data)
@@ -349,10 +363,10 @@ def upload_image_urls():
         except Exception as e:
             return {'url': url, 'error': str(e), '_failed': True}
 
-    # 并发下载（最多10个线程同时下载）
+    # 并发下载（最多20个线程同时下载，提升大批量下载速度）
     uploaded_files = []
     failed_files = []
-    max_workers = min(10, len(clean_urls))
+    max_workers = min(20, len(clean_urls))
 
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {executor.submit(download_single_url, (i, url)): i
@@ -374,29 +388,41 @@ def upload_image_urls():
             elif r:
                 uploaded_files.append(r)
 
-    print(f"[上传完成] {task_id}: 成功 {len(uploaded_files)}/{len(clean_urls)}, 失败 {len(failed_files)}")
+    print(f"[上传{'追加' if is_incremental else '完成'}] {task_id}: 本批成功 {len(uploaded_files)}/{len(clean_urls)}, 失败 {len(failed_files)}")
 
-    # 初始化任务
-    tasks[task_id] = {
-        'task_id': task_id,
-        'status': 'pending',
-        'message': '图片URL下载完成，等待开始搜索',
-        'uploaded_files': uploaded_files,
-        'failed_files': failed_files,
-        'created_at': datetime.now().isoformat(),
-        'upload_dir': task_upload_dir,
-    }
+    if is_incremental:
+        # 增量上传：追加到已有任务
+        tasks[task_id]['uploaded_files'].extend(uploaded_files)
+        tasks[task_id]['failed_files'].extend(failed_files)
+        tasks[task_id]['message'] = f'图片URL下载完成，共 {len(tasks[task_id]["uploaded_files"])} 张'
+    else:
+        # 首次上传：创建新任务
+        tasks[task_id] = {
+            'task_id': task_id,
+            'status': 'pending',
+            'message': '图片URL下载完成，等待开始搜索',
+            'uploaded_files': uploaded_files,
+            'failed_files': failed_files,
+            'created_at': datetime.now().isoformat(),
+            'upload_dir': task_upload_dir,
+        }
 
     save_task_result(task_id, tasks[task_id])
+
+    total_uploaded = len(tasks[task_id].get('uploaded_files', []))
+    total_failed = len(tasks[task_id].get('failed_files', []))
 
     return jsonify({
         'task_id': task_id,
         'status': 'pending',
         'uploaded_count': len(uploaded_files),
         'failed_count': len(failed_files),
+        'total_uploaded': total_uploaded,
+        'total_failed': total_failed,
+        'is_incremental': is_incremental,
         'uploaded_files': uploaded_files,
         'failed_files': failed_files,
-        'message': f'成功下载 {len(uploaded_files)} 张图片' + (f'，失败 {len(failed_files)} 张' if failed_files else ''),
+        'message': f'本批成功 {len(uploaded_files)} 张，累计 {total_uploaded} 张' + (f'，失败 {len(failed_files)} 张' if failed_files else ''),
     })
 
 
