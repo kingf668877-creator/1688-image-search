@@ -42,6 +42,13 @@
     taskId: null,
     pollingTimer: null,
     results: null,
+    // 分页状态
+    pagination: {
+      currentPage: 1,
+      pageSize: 20,
+      totalItems: 0,
+      imageNames: [],
+    },
   };
 
   // ====== DOM 元素 ======
@@ -115,6 +122,21 @@
     settingsSave: document.getElementById('settingsSave'),
     apiBaseInput: document.getElementById('apiBaseInput'),
     connectionStatus: document.getElementById('connectionStatus'),
+
+    // 上传耗时 & 分页
+    uploadTiming: document.getElementById('uploadTiming'),
+    uploadTimingValue: document.getElementById('uploadTimingValue'),
+    paginationWrap: document.getElementById('paginationWrap'),
+    paginationInfo: document.getElementById('paginationInfo'),
+    pageCurrentNum: document.getElementById('pageCurrentNum'),
+    pageTotalNum: document.getElementById('pageTotalNum'),
+    pageFirst: document.getElementById('pageFirst'),
+    pagePrev: document.getElementById('pagePrev'),
+    pageNext: document.getElementById('pageNext'),
+    pageLast: document.getElementById('pageLast'),
+    pageJumpInput: document.getElementById('pageJumpInput'),
+    pageJumpBtn: document.getElementById('pageJumpBtn'),
+    pageSizeSelect: document.getElementById('pageSizeSelect'),
   };
 
   // ====== 初始化 ======
@@ -127,6 +149,7 @@
     setupButtons();
     setupSettings();
     setupResultModal();
+    setupPagination();
     loadHistory();
     // 初始添加 3 行表格
     addTableRow();
@@ -541,6 +564,8 @@
     el.searchBtn.disabled = true;
     el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
 
+    const uploadStartTime = Date.now();
+
     try {
       let uploadData;
 
@@ -567,6 +592,11 @@
         uploadData = await res.json();
         if (!res.ok) throw new Error(uploadData.error || '上传失败');
       }
+
+      // 显示上传接口耗时
+      const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+      el.uploadTiming.style.display = 'flex';
+      el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
 
       state.taskId = uploadData.task_id;
 
@@ -690,8 +720,16 @@
 
     const totalImages = data.total_images || 0;
     const totalProducts = data.total_products || 0;
+    const searchDuration = data.search_duration || 0;
 
     el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
+
+    // 格式化总耗时（秒和分钟）
+    const durationSec = searchDuration.toFixed(2);
+    const durationMin = (searchDuration / 60).toFixed(1);
+    const durationText = searchDuration >= 60
+      ? `${durationSec} 秒（${durationMin} 分钟）`
+      : `${durationSec} 秒`;
 
     el.statsRow.innerHTML = `
       <div class="stat-card">
@@ -706,19 +744,118 @@
         <div class="stat-num">${totalImages > 0 ? Math.round(totalProducts / totalImages) : 0}</div>
         <div class="stat-label">平均结果/图</div>
       </div>
+      <div class="stat-card timing-card">
+        <div class="stat-num">${durationText}</div>
+        <div class="stat-label">接口总耗时</div>
+      </div>
     `;
 
-    el.resultList.innerHTML = '';
+    // 准备分页数据
     const results = data.results || {};
     const imageNames = Object.keys(results);
+    state.pagination.imageNames = imageNames;
+    state.pagination.totalItems = imageNames.length;
+    state.pagination.currentPage = 1;
 
-    imageNames.forEach((imageName) => {
+    // 渲染当前页
+    renderPaginatedResults(results);
+
+    el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // ====== 分页渲染结果行 ======
+  function renderPaginatedResults(results) {
+    const pg = state.pagination;
+    const { currentPage, pageSize, totalItems, imageNames } = pg;
+    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+    if (currentPage > totalPages) pg.currentPage = totalPages;
+
+    const startIdx = (pg.currentPage - 1) * pageSize;
+    const endIdx = Math.min(startIdx + pageSize, totalItems);
+    const pageItems = imageNames.slice(startIdx, endIdx);
+
+    el.resultList.innerHTML = '';
+    pageItems.forEach((imageName) => {
       const imageData = results[imageName];
       const row = createResultRow(imageName, imageData);
       el.resultList.appendChild(row);
     });
 
-    el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // 更新分页控件
+    updatePaginationControls(totalPages, startIdx, endIdx);
+  }
+
+  // ====== 更新分页控件 ======
+  function updatePaginationControls(totalPages, startIdx, endIdx) {
+    const pg = state.pagination;
+    const total = pg.totalItems;
+
+    if (total === 0) {
+      el.paginationWrap.style.display = 'none';
+      return;
+    }
+
+    el.paginationWrap.style.display = 'flex';
+    el.pageCurrentNum.textContent = pg.currentPage;
+    el.pageTotalNum.textContent = totalPages;
+    el.paginationInfo.textContent = `第 ${startIdx + 1}-${endIdx} 条，共 ${total} 条`;
+
+    // 按钮状态
+    el.pageFirst.disabled = pg.currentPage <= 1;
+    el.pagePrev.disabled = pg.currentPage <= 1;
+    el.pageNext.disabled = pg.currentPage >= totalPages;
+    el.pageLast.disabled = pg.currentPage >= totalPages;
+
+    el.pageJumpInput.max = totalPages;
+    el.pageJumpInput.value = pg.currentPage;
+  }
+
+  // ====== 分页事件绑定 ======
+  function setupPagination() {
+    el.pageSizeSelect.addEventListener('change', () => {
+      state.pagination.pageSize = parseInt(el.pageSizeSelect.value);
+      state.pagination.currentPage = 1;
+      if (state.results) renderPaginatedResults(state.results.results || {});
+    });
+
+    el.pageFirst.addEventListener('click', () => {
+      state.pagination.currentPage = 1;
+      if (state.results) renderPaginatedResults(state.results.results || {});
+    });
+
+    el.pagePrev.addEventListener('click', () => {
+      if (state.pagination.currentPage > 1) {
+        state.pagination.currentPage--;
+        if (state.results) renderPaginatedResults(state.results.results || {});
+      }
+    });
+
+    el.pageNext.addEventListener('click', () => {
+      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+      if (state.pagination.currentPage < totalPages) {
+        state.pagination.currentPage++;
+        if (state.results) renderPaginatedResults(state.results.results || {});
+      }
+    });
+
+    el.pageLast.addEventListener('click', () => {
+      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+      state.pagination.currentPage = totalPages;
+      if (state.results) renderPaginatedResults(state.results.results || {});
+    });
+
+    el.pageJumpBtn.addEventListener('click', () => {
+      const page = parseInt(el.pageJumpInput.value);
+      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+      if (page >= 1 && page <= totalPages) {
+        state.pagination.currentPage = page;
+        if (state.results) renderPaginatedResults(state.results.results || {});
+      }
+    });
+
+    el.pageJumpInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') el.pageJumpBtn.click();
+    });
   }
 
   // ====== 创建结果行（一行一图 + 横向商品 + 查看更多） ======
@@ -814,20 +951,31 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">`
       : '<div class="mini-img-placeholder">无图</div>';
 
+    // 店铺链接
+    const shopHtml = item.shop
+      ? `<a class="mini-product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
+      : '';
+
     card.innerHTML = `
       <div class="mini-product-img">
         ${simBadge}
         ${imgHtml}
       </div>
       <div class="mini-product-body">
-        <div class="mini-product-title">${item.title || '暂无标题'}</div>
+        <a class="mini-product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
         <div class="mini-product-price">${formatPrice(item.price)}</div>
-        <div class="mini-product-shop">${item.shop || ''}</div>
+        ${shopHtml}
       </div>
     `;
 
+    // 图片也可点击跳转
     if (item.url) {
-      card.addEventListener('click', () => window.open(item.url, '_blank'));
+      const imgEl = card.querySelector('.mini-product-img');
+      imgEl.style.cursor = 'pointer';
+      imgEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.open(item.url, '_blank');
+      });
     }
     return card;
   }
@@ -886,6 +1034,11 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
       : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
 
+    // 店铺链接
+    const shopHtml = item.shop
+      ? `<a class="product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
+      : '';
+
     card.innerHTML = `
       <div class="product-img">
         ${simBadge}
@@ -893,16 +1046,22 @@
         ${simBar}
       </div>
       <div class="product-body">
-        <div class="product-title">${item.title || '暂无标题'}</div>
+        <a class="product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
         <div class="product-price">
           <span class="price-text">${formatPrice(item.price)}</span>
         </div>
-        <div class="product-shop">${item.shop || ''}</div>
+        ${shopHtml}
       </div>
     `;
 
+    // 图片也可点击跳转
     if (item.url) {
-      card.addEventListener('click', () => window.open(item.url, '_blank'));
+      const imgEl = card.querySelector('.product-img');
+      imgEl.style.cursor = 'pointer';
+      imgEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        window.open(item.url, '_blank');
+      });
     }
     return card;
   }
@@ -933,6 +1092,8 @@
     clearTable();
     el.resultSection.style.display = 'none';
     el.progressSection.style.display = 'none';
+    el.uploadTiming.style.display = 'none';
+    el.paginationWrap.style.display = 'none';
     el.searchBtn.disabled = false;
     el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
     window.scrollTo({ top: 0, behavior: 'smooth' });
