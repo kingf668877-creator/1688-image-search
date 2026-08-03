@@ -7,12 +7,13 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://cdt-registry-proudly-individuals.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://farm-leads-discusses-generating.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
     'https://dianleida.pythonanywhere.com',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
     'https://macintosh-executives-til-performer.trycloudflare.com',
+    'https://cdt-registry-proudly-individuals.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
