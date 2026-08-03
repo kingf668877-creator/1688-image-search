@@ -821,7 +821,7 @@
       </div>
       <div class="mini-product-body">
         <div class="mini-product-title">${item.title || '暂无标题'}</div>
-        <div class="mini-product-price">${item.price || '面议'}</div>
+        <div class="mini-product-price">${formatPrice(item.price)}</div>
         <div class="mini-product-shop">${item.shop || ''}</div>
       </div>
     `;
@@ -895,7 +895,7 @@
       <div class="product-body">
         <div class="product-title">${item.title || '暂无标题'}</div>
         <div class="product-price">
-          <span class="price-text">${item.price || '面议'}</span>
+          <span class="price-text">${formatPrice(item.price)}</span>
         </div>
         <div class="product-shop">${item.shop || ''}</div>
       </div>
@@ -1081,6 +1081,15 @@
     } catch {
       return isoString;
     }
+  }
+
+  // 价格四舍五入保留两位小数
+  function formatPrice(price) {
+    if (price === undefined || price === null || price === '') return '面议';
+    // 提取数值部分（价格可能带¥符号或"元"等）
+    const num = parseFloat(String(price).replace(/[^\d.]/g, ''));
+    if (isNaN(num)) return String(price);
+    return '¥' + num.toFixed(2);
   }
 
   // ====== 启动 ======
