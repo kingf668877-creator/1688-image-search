@@ -522,6 +522,36 @@ img {
   color: white;
 }
 
+/* ===== 加载更多按钮 ===== */
+.load-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 80px;
+  padding: 16px;
+  border: 2px dashed #d0d7de;
+  border-radius: var(--radius-md);
+  background: #f8f9fa;
+  color: #586069;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition);
+  grid-column: 1 / -1;
+}
+.load-more-btn:hover {
+  border-color: var(--primary-color);
+  background: #f0f7ff;
+  color: var(--primary-color);
+}
+.load-more-count {
+  font-size: 12px;
+  font-weight: 400;
+  opacity: 0.7;
+}
+
 /* ===== 按钮样式 ===== */
 .upload-actions {
   display: flex;
