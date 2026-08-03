@@ -7,7 +7,7 @@
 
   // ====== API 配置 ======
   // 从 localStorage 读取后端地址，默认使用当前域名（同域部署时）
-  const DEFAULT_API_BASE = 'https://e216772.r5.cpolar.top';
+  const DEFAULT_API_BASE = 'https://suites-traditional-bay-pushing.trycloudflare.com';
   const getApiBase = () => {
     return localStorage.getItem('apiBase') || DEFAULT_API_BASE;
   };
