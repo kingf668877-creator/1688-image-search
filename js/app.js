@@ -7,11 +7,12 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://macintosh-executives-til-performer.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://cdt-registry-proudly-individuals.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
     'https://dianleida.pythonanywhere.com',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
+    'https://macintosh-executives-til-performer.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
@@ -642,27 +643,73 @@
       let uploadData;
 
       if (state.currentTab === 'link') {
-        // 链接方式：调用 /api/upload_urls
+        // 链接方式：分块上传URL，避免单次请求超时
         const urls = parseUrls();
-        // 大量URL时显示进度提示
-        if (urls.length > 50) {
-          el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${urls.length} 张图片...</span>`;
-        } else {
-          el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
+        const CHUNK_SIZE = 50; // 每批50个URL
+        const totalChunks = Math.ceil(urls.length / CHUNK_SIZE);
+        let taskId = null;
+        let totalUploaded = 0;
+        let totalFailed = 0;
+        let allFailedFiles = [];
+
+        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
+          const chunkStart = chunkIdx * CHUNK_SIZE;
+          const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, urls.length);
+          const chunkUrls = urls.slice(chunkStart, chunkEnd);
+
+          // 更新进度提示
+          if (totalChunks > 1) {
+            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${chunkEnd}/${urls.length} 张...（第${chunkIdx + 1}/${totalChunks}批）</span>`;
+          } else {
+            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${urls.length} 张图片...</span>`;
+          }
+
+          // 每批请求超时3分钟
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 180000);
+
+          const requestBody = { urls: chunkUrls };
+          if (taskId) requestBody.task_id = taskId; // 增量上传
+
+          let res;
+          try {
+            res = await fetch(api('/api/upload_urls'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody),
+              signal: controller.signal,
+            });
+          } catch (fetchErr) {
+            // 网络错误时重试一次
+            clearTimeout(timeoutId);
+            console.warn(`第${chunkIdx + 1}批上传失败，重试中...`, fetchErr);
+            const retryController = new AbortController();
+            const retryTimeoutId = setTimeout(() => retryController.abort(), 180000);
+            res = await fetch(api('/api/upload_urls'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(requestBody),
+              signal: retryController.signal,
+            });
+            clearTimeout(retryTimeoutId);
+          }
+          clearTimeout(timeoutId);
+
+          const chunkData = await res.json();
+          if (!res.ok) throw new Error(chunkData.error || 'URL上传失败');
+
+          taskId = chunkData.task_id;
+          totalUploaded = chunkData.total_uploaded || (totalUploaded + chunkData.uploaded_count);
+          totalFailed += chunkData.failed_count || 0;
+          if (chunkData.failed_files) allFailedFiles = allFailedFiles.concat(chunkData.failed_files);
         }
 
-        // 使用 AbortController 设置超时（10分钟，适应大量图片下载）
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000);
-        const res = await fetch(api('/api/upload_urls'), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls }),
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        uploadData = await res.json();
-        if (!res.ok) throw new Error(uploadData.error || 'URL上传失败');
+        uploadData = {
+          task_id: taskId,
+          uploaded_count: totalUploaded,
+          failed_count: totalFailed,
+          failed_files: allFailedFiles,
+        };
       } else {
         // 批量 / 表格方式：调用 /api/upload
         const files = state.currentTab === 'batch' ? state.files : getTableFiles();
@@ -713,7 +760,7 @@
       console.error('搜索启动失败:', error);
       let errMsg = error.message;
       if (error.name === 'AbortError') {
-        errMsg = '上传超时（超过10分钟），请减少图片数量或检查网络后重试';
+        errMsg = '上传超时，请检查网络连接或减少图片数量后重试';
       }
       alert('启动失败: ' + errMsg);
       el.searchBtn.disabled = false;
