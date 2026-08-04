@@ -949,6 +949,114 @@ img {
   text-overflow: ellipsis;
 }
 
+/* 价格行（价格 + 起批量） */
+.product-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+  gap: 8px;
+}
+
+.product-price-row .price-text {
+  font-size: 20px;
+  font-weight: 700;
+  color: #ff4400;
+  line-height: 1;
+}
+
+.product-price-row .price-text::before {
+  content: '¥';
+  font-size: 14px;
+  font-weight: 600;
+  margin-right: 1px;
+}
+
+.product-moq {
+  font-size: 11px;
+  color: #ff6a00;
+  background: #fff5ed;
+  padding: 3px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 500;
+  border: 1px solid #ffd9bf;
+}
+
+/* 销量数据 */
+.product-sales {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 8px;
+  flex-wrap: wrap;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #f0f0f0;
+}
+
+.sales-item {
+  font-size: 11px;
+  color: #666;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* 配送/运费 */
+.product-delivery {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+
+.delivery-item {
+  font-size: 11px;
+  color: #52c41a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.delivery-item.delivery-time {
+  color: #ff6a00;
+}
+
+/* 店铺信息区 */
+.product-shop-wrapper {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f5f5f5;
+}
+
+/* 店铺元信息（城市、年限） */
+.shop-meta {
+  display: flex;
+  gap: 10px;
+  margin-top: 4px;
+  flex-wrap: wrap;
+}
+
+.shop-city, .shop-year {
+  font-size: 10px;
+  color: #999;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.shop-year {
+  color: #ff6a00;
+  font-weight: 500;
+}
+
 /* 空状态 */
 .empty-state {
   text-align: center;
@@ -1886,6 +1994,104 @@ img {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.mini-price-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.mini-price-row .mini-product-price {
+  font-size: 15px;
+  font-weight: 700;
+  color: #ff4400;
+}
+
+.mini-moq {
+  font-size: 10px;
+  color: #ff6a00;
+  background: #fff5ed;
+  padding: 1px 6px;
+  border-radius: 3px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 500;
+  border: 1px solid #ffd9bf;
+}
+
+/* 销量行（总件数 + 总订单数） */
+.mini-sales-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 4px;
+  flex-wrap: wrap;
+}
+
+.mini-sales-item {
+  font-size: 10px;
+  color: #888;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+/* 配送行（运费 + 揽收时效） */
+.mini-delivery-row {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.mini-delivery-item {
+  font-size: 9px;
+  color: #52c41a;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mini-delivery-item.mini-delivery-time {
+  color: #ff6a00;
+}
+
+/* 店铺信息区 */
+.mini-product-shop-wrapper {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid #f5f5f5;
+}
+
+.mini-product-shop-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.mini-shop-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 3px;
+  flex-wrap: wrap;
+}
+
+.mini-shop-city, .mini-shop-year {
+  font-size: 9px;
+  color: #bbb;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.mini-shop-year {
+  color: #ff6a00;
+  font-weight: 500;
 }
 
 /* ===== 查看更多结果弹窗 ===== */
