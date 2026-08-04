@@ -1167,25 +1167,51 @@
       moqHtml = `<span class="mini-moq">${item.quantity_begin}</span>`;
     }
 
-    // 销量
+    // 销量 + 订单数
     let salesHtml = '';
-    if (item.sale_quantity || item.booked_count) {
-      const saleText = item.sale_quantity || item.booked_count;
-      salesHtml = `<div class="mini-sales">📦 ${saleText}</div>`;
+    const salesParts = [];
+    if (item.sale_quantity) {
+      salesParts.push(`<span class="mini-sales-item" title="总件数">📦${item.sale_quantity}</span>`);
+    }
+    if (item.booked_count) {
+      salesParts.push(`<span class="mini-sales-item" title="总订单数">📋${item.booked_count}</span>`);
+    }
+    if (salesParts.length > 0) {
+      salesHtml = `<div class="mini-sales-row">${salesParts.join('')}</div>`;
     }
 
-    // 店铺 + 城市
+    // 运费 + 揽收时效
+    let deliveryHtml = '';
+    const deliveryParts = [];
+    if (item.price_description) {
+      deliveryParts.push(`<span class="mini-delivery-item" title="运费">🚚${item.price_description}</span>`);
+    }
+    if (item.fenxiao_time_limit) {
+      deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
+    }
+    if (deliveryParts.length > 0) {
+      deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
+    }
+
+    // 店铺 + 城市 + 开店年限
     let shopHtml = '';
     if (item.shop) {
       const shopUrl = item.win_port_url || item.shop_url || '#';
-      let cityHtml = '';
+      let shopMeta = '';
+      const metaParts = [];
       if (item.city) {
-        cityHtml = `<span class="mini-shop-city">· ${item.city}</span>`;
+        metaParts.push(`<span class="mini-shop-city">📍${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="mini-shop-year">🏪${item.shop_year}</span>`);
+      }
+      if (metaParts.length > 0) {
+        shopMeta = `<div class="mini-shop-meta">${metaParts.join('')}</div>`;
       }
       shopHtml = `
-        <div class="mini-product-shop-row">
+        <div class="mini-product-shop-wrapper">
           <a class="mini-product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>
-          ${cityHtml}
+          ${shopMeta}
         </div>
       `;
     }
@@ -1202,6 +1228,7 @@
           ${moqHtml}
         </div>
         ${salesHtml}
+        ${deliveryHtml}
         ${shopHtml}
       </div>
     `;
