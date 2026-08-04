@@ -18,6 +18,7 @@ from urllib.parse import urlparse
 import urllib.request
 import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from queue import Queue
 from flask import Flask, render_template, request, jsonify, send_from_directory, abort, Response
 from werkzeug.utils import secure_filename
 
@@ -188,6 +189,177 @@ def run_search_task(task_id, image_files):
                 pass
 
 
+def run_stream_search_task(task_id, max_workers=3):
+    """
+    流式搜索任务：边下载边搜索（生产者-消费者模式）
+    下载线程持续将图片加入队列，搜索工作线程持续从队列取图片搜索
+    当 download_complete=True 且队列为空时，搜索结束
+    """
+    from search_engine import SearchEngine
+
+    task = tasks.get(task_id)
+    if not task:
+        return
+
+    engine = None
+    try:
+        engine = SearchEngine(headless=True)
+        task['status'] = 'searching'
+        task['message'] = '边下载边搜索中...'
+        task['results'] = task.get('results', {})
+        task['search_started_at'] = datetime.now().isoformat()
+        task['searched_count'] = 0
+        # 保留已有的 download_complete 状态（可能由 upload_urls 预设）
+        if 'download_complete' not in task:
+            task['download_complete'] = False
+
+        search_queue = Queue()
+        searched_names = set()  # 已加入队列的图片名，避免重复
+        lock = threading.Lock()
+        search_start_time = time.time()
+
+        # 先把已有的图片加入队列
+        for f in task.get('uploaded_files', []):
+            if f['name'] not in searched_names:
+                search_queue.put(f)
+                searched_names.add(f['name'])
+
+        def search_worker(worker_id):
+            """搜索工作线程"""
+            while True:
+                try:
+                    img_file = search_queue.get(timeout=2)
+                except Exception:
+                    # 队列为空，检查是否下载完成且所有都已搜索
+                    with lock:
+                        if task.get('download_complete') and search_queue.empty():
+                            return
+                    continue
+
+                img_name = img_file['name']
+                img_path = img_file['path']
+                print(f"[流式搜索-{worker_id}] 开始: {img_name}")
+
+                try:
+                    results = engine._search_single_api(img_path)
+                except Exception as e:
+                    print(f"[流式搜索-ERROR] {img_name}: {e}")
+                    results = []
+
+                result_entry = {
+                    "image_path": img_path,
+                    "image_name": img_name,
+                    "search_time": datetime.now().isoformat(),
+                    "result_count": len(results),
+                    "results": results,
+                    "status": "completed" if results else "no_results",
+                }
+
+                with lock:
+                    task['results'][img_name] = result_entry
+                    task['searched_count'] = task.get('searched_count', 0) + 1
+                    task['current'] = task['searched_count']
+                    # total 取已下载数和预期总数的较大值
+                    uploaded_count = len(task.get('uploaded_files', []))
+                    expected_total = task.get('expected_total', uploaded_count)
+                    task['total'] = max(uploaded_count, expected_total)
+                    task['message'] = f'搜索中: {task["searched_count"]}/{task["total"]} 张（已下载 {uploaded_count} 张）'
+
+                    # 实时保存进度（每搜完5张存一次，减少IO）
+                    if task['searched_count'] % 5 == 0:
+                        save_task_result(task_id, {
+                            'task_id': task_id,
+                            'status': task['status'],
+                            'current': task['current'],
+                            'total': task['total'],
+                            'message': task['message'],
+                            'results': task['results'],
+                            'searched_count': task['searched_count'],
+                            'downloaded_count': uploaded_count,
+                            'updated_at': datetime.now().isoformat(),
+                        })
+
+                search_queue.task_done()
+
+        # 启动搜索工作线程
+        workers = []
+        for i in range(max_workers):
+            t = threading.Thread(target=search_worker, args=(i,), daemon=True)
+            t.start()
+            workers.append(t)
+
+        # 监控线程：持续检查是否有新下载的图片需要加入队列
+        def monitor_new_images():
+            while not task.get('download_complete'):
+                time.sleep(0.5)
+                new_count = 0
+                for f in task.get('uploaded_files', []):
+                    if f['name'] not in searched_names:
+                        search_queue.put(f)
+                        searched_names.add(f['name'])
+                        new_count += 1
+                if new_count > 0:
+                    print(f"[流式搜索] 新增 {new_count} 张图片到搜索队列，队列当前 {search_queue.qsize()} 张待搜")
+
+        monitor_thread = threading.Thread(target=monitor_new_images, daemon=True)
+        monitor_thread.start()
+        monitor_thread.join()  # 等待下载完成
+
+        # 等待所有搜索工作线程结束
+        for t in workers:
+            t.join()
+
+        # 搜索完成
+        search_end_time = time.time()
+        total_search_duration = round(search_end_time - search_start_time, 2)
+        total_products = sum(r.get('result_count', 0) for r in task.get('results', {}).values())
+
+        task['status'] = 'completed'
+        task['message'] = f'搜索完成！共找到 {total_products} 个商品'
+        task['completed_at'] = datetime.now().isoformat()
+        task['search_duration'] = total_search_duration
+
+        # 保存最终结果
+        save_task_result(task_id, {
+            'task_id': task_id,
+            'status': 'completed',
+            'current': task.get('searched_count', 0),
+            'total': len(task.get('uploaded_files', [])),
+            'message': task['message'],
+            'results': task['results'],
+            'completed_at': task['completed_at'],
+            'created_at': task.get('created_at'),
+            'search_started_at': task.get('search_started_at'),
+            'search_duration': total_search_duration,
+            'searched_count': task.get('searched_count', 0),
+            'downloaded_count': len(task.get('uploaded_files', [])),
+        })
+
+        print(f"[流式搜索完成] {task_id}: 共搜索 {task.get('searched_count', 0)} 张，找到 {total_products} 个商品，耗时 {total_search_duration}s")
+
+    except Exception as e:
+        print(f"[流式搜索失败] {task_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        task['status'] = 'failed'
+        task['message'] = f'搜索失败: {str(e)}'
+        task['error'] = str(e)
+        save_task_result(task_id, {
+            'task_id': task_id,
+            'status': 'failed',
+            'message': task['message'],
+            'error': str(e),
+            'results': task.get('results', {}),
+            'failed_at': datetime.now().isoformat(),
+        })
+    finally:
+        if engine:
+            try:
+                engine.close()
+            except:
+                pass
+
+
 # ============ 路由 ============
 
 @app.route('/')
@@ -299,6 +471,9 @@ def upload_image_urls():
 
     # 支持增量上传：如果传入了task_id，则追加到已有任务
     existing_task_id = data.get('task_id')
+    auto_search = data.get('auto_search', False)
+    expected_total = data.get('expected_total', 0)
+    is_last_batch = data.get('is_last_batch', False)
     is_incremental = False
     existing_uploaded_count = 0
 
@@ -394,7 +569,16 @@ def upload_image_urls():
         # 增量上传：追加到已有任务
         tasks[task_id]['uploaded_files'].extend(uploaded_files)
         tasks[task_id]['failed_files'].extend(failed_files)
-        tasks[task_id]['message'] = f'图片URL下载完成，共 {len(tasks[task_id]["uploaded_files"])} 张'
+        total_uploaded_count = len(tasks[task_id]['uploaded_files'])
+        tasks[task_id]['message'] = f'图片URL下载中... {total_uploaded_count}/{tasks[task_id].get("expected_total", total_uploaded_count)} 张'
+        # 更新预期总数
+        if expected_total and expected_total > 0:
+            tasks[task_id]['expected_total'] = expected_total
+        # 如果是最后一批，标记下载完成
+        if is_last_batch:
+            tasks[task_id]['download_complete'] = True
+            tasks[task_id]['message'] = f'图片URL全部下载完成，共 {total_uploaded_count} 张（搜索中...）'
+            print(f"[流式搜索] {task_id}: 全部下载完成，等待搜索结束")
     else:
         # 首次上传：创建新任务
         tasks[task_id] = {
@@ -406,23 +590,45 @@ def upload_image_urls():
             'created_at': datetime.now().isoformat(),
             'upload_dir': task_upload_dir,
         }
+        # 设置预期总数
+        if expected_total and expected_total > 0:
+            tasks[task_id]['expected_total'] = expected_total
+
+        # 如果启用了自动搜索，立即启动流式搜索
+        if auto_search and len(uploaded_files) > 0:
+            tasks[task_id]['status'] = 'searching'
+            tasks[task_id]['download_complete'] = is_last_batch
+            tasks[task_id]['searched_count'] = 0
+            tasks[task_id]['results'] = {}
+            tasks[task_id]['message'] = f'边下载边搜索中... 已下载 {len(uploaded_files)} 张'
+            thread = threading.Thread(
+                target=run_stream_search_task,
+                args=(task_id, 3),
+                daemon=True
+            )
+            thread.start()
+            print(f"[流式搜索] {task_id}: 已启动流式搜索，初始图片 {len(uploaded_files)} 张，预期总数 {expected_total}")
 
     save_task_result(task_id, tasks[task_id])
 
     total_uploaded = len(tasks[task_id].get('uploaded_files', []))
     total_failed = len(tasks[task_id].get('failed_files', []))
+    task_status = tasks[task_id].get('status', 'pending')
+    is_streaming = task_status == 'searching' and not tasks[task_id].get('download_complete', False)
 
     return jsonify({
         'task_id': task_id,
-        'status': 'pending',
+        'status': task_status,
         'uploaded_count': len(uploaded_files),
         'failed_count': len(failed_files),
         'total_uploaded': total_uploaded,
         'total_failed': total_failed,
         'is_incremental': is_incremental,
+        'is_streaming': is_streaming,
+        'searched_count': tasks[task_id].get('searched_count', 0),
         'uploaded_files': uploaded_files,
         'failed_files': failed_files,
-        'message': f'本批成功 {len(uploaded_files)} 张，累计 {total_uploaded} 张' + (f'，失败 {len(failed_files)} 张' if failed_files else ''),
+        'message': tasks[task_id].get('message', ''),
     })
 
 
@@ -485,13 +691,23 @@ def get_status(task_id):
     if not task:
         return jsonify({'error': '任务不存在'}), 404
 
+    downloaded_count = len(task.get('uploaded_files', []))
+    searched_count = task.get('searched_count', task.get('current', 0))
+    expected_total = task.get('expected_total', downloaded_count)
+    total_images = max(downloaded_count, expected_total, task.get('total', 0))
+
     return jsonify({
         'task_id': task_id,
         'status': task.get('status', 'unknown'),
         'message': task.get('message', ''),
         'current': task.get('current', 0),
-        'total': task.get('total', 0),
-        'progress': (task.get('current', 0) / task.get('total', 1) * 100) if task.get('total', 0) > 0 else 0,
+        'total': total_images,
+        'progress': (searched_count / total_images * 100) if total_images > 0 else 0,
+        'downloaded_count': downloaded_count,
+        'searched_count': searched_count,
+        'expected_total': expected_total,
+        'download_complete': task.get('download_complete', True),
+        'is_streaming': task.get('status') == 'searching' and not task.get('download_complete', True),
         'results_count': sum(r.get('result_count', 0) for r in task.get('results', {}).values()) if task.get('results') else 0,
         'updated_at': task.get('updated_at', task.get('created_at', '')),
     })
