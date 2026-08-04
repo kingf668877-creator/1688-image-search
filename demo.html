@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商品卡片参数展示 - 演示</title>
+  <link rel="stylesheet" href="css/style.css">
+  <style>
+    body {
+      background: #fafbfc;
+      padding: 40px 20px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .demo-container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    .demo-title {
+      text-align: center;
+      font-size: 24px;
+      color: #1a1a2e;
+      margin-bottom: 10px;
+    }
+    .demo-subtitle {
+      text-align: center;
+      color: #999;
+      margin-bottom: 40px;
+    }
+    .demo-section {
+      margin-bottom: 50px;
+    }
+    .demo-section-title {
+      font-size: 18px;
+      color: #333;
+      margin-bottom: 20px;
+      padding-left: 12px;
+      border-left: 4px solid #ff6a00;
+    }
+    .product-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 20px;
+    }
+    .mini-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 16px;
+    }
+    .params-list {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 30px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.04);
+    }
+    .params-list h3 {
+      margin: 0 0 15px 0;
+      font-size: 16px;
+      color: #333;
+    }
+    .params-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 12px;
+    }
+    .param-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: #555;
+    }
+    .param-icon {
+      font-size: 16px;
+    }
+    .param-name {
+      color: #999;
+      min-width: 60px;
+    }
+    .param-value {
+      color: #ff6a00;
+      font-weight: 500;
+    }
+  </style>
+</head>
+<body>
+  <div class="demo-container">
+    <h1 class="demo-title">商品卡片参数展示演示</h1>
+    <p class="demo-subtitle">搜索结果中每个商品卡片将展示以下全部参数</p>
+
+    <div class="params-list">
+      <h3>📋 已实现的参数字段（共8项）</h3>
+      <div class="params-grid">
+        <div class="param-item">
+          <span class="param-icon">📦</span>
+          <span class="param-name">总件数</span>
+          <span class="param-value">sale_quantity</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">📋</span>
+          <span class="param-name">总订单数</span>
+          <span class="param-value">booked_count</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">🏷️</span>
+          <span class="param-name">起批量</span>
+          <span class="param-value">quantity_begin</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">🚚</span>
+          <span class="param-name">运费</span>
+          <span class="param-value">price_description</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">⏱</span>
+          <span class="param-name">揽收时效</span>
+          <span class="param-value">fenxiao_time_limit</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">📍</span>
+          <span class="param-name">所在城市</span>
+          <span class="param-value">city</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">🏪</span>
+          <span class="param-name">开店年限</span>
+          <span class="param-value">shop_year</span>
+        </div>
+        <div class="param-item">
+          <span class="param-icon">🏬</span>
+          <span class="param-name">店铺地址</span>
+          <span class="param-value">win_port_url</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 完整商品卡片（弹窗样式） -->
+    <div class="demo-section">
+      <div class="demo-section-title">完整商品卡片（查看更多弹窗内）</div>
+      <div class="product-grid" id="fullCardGrid"></div>
+    </div>
+
+    <!-- 迷你商品卡片（列表样式） -->
+    <div class="demo-section">
+      <div class="demo-section-title">迷你商品卡片（搜索结果列表中）</div>
+      <div class="mini-grid" id="miniCardGrid"></div>
+    </div>
+  </div>
+
+  <script>
+    // 模拟商品数据
+    const mockProducts = [
+      {
+        title: '跨境现货纯色冰块水晶捏捏乐方块麦芽糖慢回弹解压抓握挤压玩具',
+        image: 'https://img.alicdn.com/imgextra/i4/O1CN01eV8xZ21z3z3z3z3z_!!6000000006698-0-tps-800-800.jpg',
+        price: '2.50',
+        similarity: 0.85,
+        quantity_begin: '100件起批',
+        sale_quantity: '1800+件',
+        booked_count: '2笔',
+        price_description: '首单减5元且免运费',
+        fenxiao_time_limit: '48H揽收',
+        shop: '义乌市鑫图家居用品有限公司',
+        city: '浙江金华市',
+        shop_year: '3年',
+        win_port_url: 'https://shopxxxx.1688.com',
+        url: '#'
+      },
+      {
+        title: '创意冰块捏捏乐抖音同款解压果冻猫爪粘粘乐儿童减压玩具现货批发',
+        image: 'https://img.alicdn.com/imgextra/i2/O1CN01aBcDeF1v8X7Z7Z7Z7_!!6000000006118-0-tps-800-800.jpg',
+        price: '1.20',
+        similarity: 1.12,
+        quantity_begin: '1件起批',
+        sale_quantity: '14.3万+件',
+        booked_count: '404笔',
+        price_description: '包邮',
+        fenxiao_time_limit: '24H揽收',
+        shop: '义乌市贝咚玩具有限公司',
+        city: '浙江金华市',
+        shop_year: '2年',
+        win_port_url: 'https://shopxxxx.1688.com',
+        url: '#'
+      },
+      {
+        title: '跨境5cm方块麦芽糖捏捏乐金粉水立方慢回弹玩具tpr儿童发泄解压神器',
+        image: 'https://img.alicdn.com/imgextra/i3/O1CN01d9t4bK2MqN8P8P8P8_!!6000000004916-0-tps-800-800.jpg',
+        price: '0.85',
+        similarity: 1.35,
+        quantity_begin: '1件起批',
+        sale_quantity: '1.2万+件',
+        booked_count: '222笔',
+        price_description: '',
+        fenxiao_time_limit: '',
+        shop: '义乌市诚桐玩具厂',
+        city: '浙江金华市',
+        shop_year: '2年',
+        win_port_url: 'https://shopxxxx.1688.com',
+        url: '#'
+      },
+      {
+        title: '跨境爆款亚马逊捏捏乐流纹方块麦芽糖捏捏乐减压慢回弹解压玩具',
+        image: 'https://img.alicdn.com/imgextra/i1/O1CN01kF3gdv1YDYf8X7X7X_!!6000000003036-0-tps-800-800.jpg',
+        price: '3.80',
+        similarity: 1.56,
+        quantity_begin: '3件起批',
+        sale_quantity: '4.4万+件',
+        booked_count: '342笔',
+        price_description: '首单立减2元',
+        fenxiao_time_limit: '48H揽收',
+        shop: '义乌唯海电子',
+        city: '浙江义乌市',
+        shop_year: '3年',
+        win_port_url: 'https://shopxxxx.1688.com',
+        url: '#'
+      }
+    ];
+
+    // 格式化价格
+    function formatPrice(price) {
+      if (!price) return '面议';
+      const num = parseFloat(String(price).replace(/[^\d.]/g, ''));
+      if (isNaN(num)) return String(price);
+      return '¥' + num.toFixed(2);
+    }
+
+    // 创建完整商品卡片
+    function createFullProductCard(item) {
+      const simBadge = item.similarity !== undefined
+        ? `<div class="similarity-badge" style="background:#ff6a00;">${Number(item.similarity).toFixed(2)}</div>`
+        : '';
+
+      const simBar = item.similarity !== undefined
+        ? `<div class="similarity-bar" style="width: ${Math.max(0, Math.min(100, (2 - item.similarity) / 2 * 100))}%; background: linear-gradient(90deg, #ff6a00, #ffaa00)"></div>`
+        : '';
+
+      const moqHtml = item.quantity_begin
+        ? `<span class="product-moq">${item.quantity_begin}</span>`
+        : '';
+
+      const salesParts = [];
+      if (item.sale_quantity) {
+        salesParts.push(`<span class="sales-item" title="总件数">📦 ${item.sale_quantity}</span>`);
+      }
+      if (item.booked_count) {
+        salesParts.push(`<span class="sales-item" title="总订单数">📋 ${item.booked_count}</span>`);
+      }
+      const salesHtml = salesParts.length > 0
+        ? `<div class="product-sales">${salesParts.join('')}</div>`
+        : '';
+
+      const deliveryParts = [];
+      if (item.price_description) {
+        deliveryParts.push(`<span class="delivery-item" title="运费">🚚 ${item.price_description}</span>`);
+      }
+      if (item.fenxiao_time_limit) {
+        deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
+      }
+      const deliveryHtml = deliveryParts.length > 0
+        ? `<div class="product-delivery">${deliveryParts.join('')}</div>`
+        : '';
+
+      const shopUrl = item.win_port_url || '#';
+      const metaParts = [];
+      if (item.city) {
+        metaParts.push(`<span class="shop-city">📍 ${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="shop-year">🏪 ${item.shop_year}</span>`);
+      }
+      const shopMeta = metaParts.length > 0
+        ? `<div class="shop-meta">${metaParts.join('')}</div>`
+        : '';
+
+      return `
+        <div class="product-card">
+          <div class="product-img">
+            ${simBadge}
+            <div style="width:100%;height:180px;background:linear-gradient(135deg,#f5f5f5,#e0e0e0);display:flex;align-items:center;justify-content:center;color:#999;font-size:14px;">商品图片</div>
+            ${simBar}
+          </div>
+          <div class="product-body">
+            <a class="product-title" href="${item.url || '#'}" target="_blank">${item.title}</a>
+            <div class="product-price-row">
+              <span class="price-text">${formatPrice(item.price)}</span>
+              ${moqHtml}
+            </div>
+            ${salesHtml}
+            ${deliveryHtml}
+            <div class="product-shop-wrapper">
+              <a class="product-shop" href="${shopUrl}" target="_blank">${item.shop}</a>
+              ${shopMeta}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 创建迷你商品卡片
+    function createMiniProductCard(item) {
+      const simBadge = item.similarity !== undefined
+        ? `<div class="similarity-badge" style="background:#ff6a00;">${Number(item.similarity).toFixed(2)}</div>`
+        : '';
+
+      const moqHtml = item.quantity_begin
+        ? `<span class="mini-moq">${item.quantity_begin}</span>`
+        : '';
+
+      const salesParts = [];
+      if (item.sale_quantity) {
+        salesParts.push(`<span class="mini-sales-item" title="总件数">📦${item.sale_quantity}</span>`);
+      }
+      if (item.booked_count) {
+        salesParts.push(`<span class="mini-sales-item" title="总订单数">📋${item.booked_count}</span>`);
+      }
+      const salesHtml = salesParts.length > 0
+        ? `<div class="mini-sales-row">${salesParts.join('')}</div>`
+        : '';
+
+      const deliveryParts = [];
+      if (item.price_description) {
+        deliveryParts.push(`<span class="mini-delivery-item" title="运费">🚚${item.price_description}</span>`);
+      }
+      if (item.fenxiao_time_limit) {
+        deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
+      }
+      const deliveryHtml = deliveryParts.length > 0
+        ? `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`
+        : '';
+
+      const shopUrl = item.win_port_url || '#';
+      const metaParts = [];
+      if (item.city) {
+        metaParts.push(`<span class="mini-shop-city">📍${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="mini-shop-year">🏪${item.shop_year}</span>`);
+      }
+      const shopMeta = metaParts.length > 0
+        ? `<div class="mini-shop-meta">${metaParts.join('')}</div>`
+        : '';
+
+      return `
+        <div class="mini-product-card">
+          <div class="mini-product-img">
+            ${simBadge}
+            <div style="width:100%;height:140px;background:linear-gradient(135deg,#f5f5f5,#e0e0e0);display:flex;align-items:center;justify-content:center;color:#999;font-size:12px;">商品图</div>
+          </div>
+          <div class="mini-product-body">
+            <a class="mini-product-title" href="${item.url || '#'}" target="_blank">${item.title}</a>
+            <div class="mini-price-row">
+              <span class="mini-product-price">${formatPrice(item.price)}</span>
+              ${moqHtml}
+            </div>
+            ${salesHtml}
+            ${deliveryHtml}
+            <div class="mini-product-shop-wrapper">
+              <a class="mini-product-shop" href="${shopUrl}" target="_blank">${item.shop}</a>
+              ${shopMeta}
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    // 渲染
+    document.getElementById('fullCardGrid').innerHTML = mockProducts.map(createFullProductCard).join('');
+    document.getElementById('miniCardGrid').innerHTML = mockProducts.map(createMiniProductCard).join('');
+  </script>
+</body>
+</html>
