@@ -7,7 +7,7 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://quilt-discounts-golf-upgrades.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://192.168.1.35:5443';
   const LEGACY_API_BASES = new Set([
     'https://dianleida.pythonanywhere.com',
     'https://e216772.r5.cpolar.top',
@@ -1161,10 +1161,60 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">`
       : '<div class="mini-img-placeholder">无图</div>';
 
-    // 店铺链接
-    const shopHtml = item.shop
-      ? `<a class="mini-product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
-      : '';
+    // 起批量
+    let moqHtml = '';
+    if (item.quantity_begin) {
+      moqHtml = `<span class="mini-moq">${item.quantity_begin}</span>`;
+    }
+
+    // 销量 + 订单数
+    let salesHtml = '';
+    const salesParts = [];
+    if (item.sale_quantity) {
+      salesParts.push(`<span class="mini-sales-item" title="总件数">📦${item.sale_quantity}</span>`);
+    }
+    if (item.booked_count) {
+      salesParts.push(`<span class="mini-sales-item" title="总订单数">📋${item.booked_count}</span>`);
+    }
+    if (salesParts.length > 0) {
+      salesHtml = `<div class="mini-sales-row">${salesParts.join('')}</div>`;
+    }
+
+    // 运费 + 揽收时效
+    let deliveryHtml = '';
+    const deliveryParts = [];
+    if (item.price_description) {
+      deliveryParts.push(`<span class="mini-delivery-item" title="运费">🚚${item.price_description}</span>`);
+    }
+    if (item.fenxiao_time_limit) {
+      deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
+    }
+    if (deliveryParts.length > 0) {
+      deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
+    }
+
+    // 店铺 + 城市 + 开店年限
+    let shopHtml = '';
+    if (item.shop) {
+      const shopUrl = item.win_port_url || item.shop_url || '#';
+      let shopMeta = '';
+      const metaParts = [];
+      if (item.city) {
+        metaParts.push(`<span class="mini-shop-city">📍${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="mini-shop-year">🏪${item.shop_year}</span>`);
+      }
+      if (metaParts.length > 0) {
+        shopMeta = `<div class="mini-shop-meta">${metaParts.join('')}</div>`;
+      }
+      shopHtml = `
+        <div class="mini-product-shop-wrapper">
+          <a class="mini-product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>
+          ${shopMeta}
+        </div>
+      `;
+    }
 
     card.innerHTML = `
       <div class="mini-product-img">
@@ -1173,7 +1223,12 @@
       </div>
       <div class="mini-product-body">
         <a class="mini-product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
-        <div class="mini-product-price">${formatPrice(item.price)}</div>
+        <div class="mini-price-row">
+          <span class="mini-product-price">${formatPrice(item.price)}</span>
+          ${moqHtml}
+        </div>
+        ${salesHtml}
+        ${deliveryHtml}
         ${shopHtml}
       </div>
     `;
@@ -1234,7 +1289,6 @@
     if (item.similarity !== undefined && item.similarity !== null) {
       const sim = item.similarity;
       const displaySim = Number(sim).toFixed(2);
-      // 进度条：值越小越相似
       const simPercent = Math.max(0, Math.min(100, (2 - sim) / 2 * 100));
       simBadge = `<div class="similarity-badge" style="background:#ff6a00;">${displaySim}</div>`;
       simBar = `<div class="similarity-bar" style="width: ${simPercent}%; background: linear-gradient(90deg, #ff6a00, #ffaa00)"></div>`;
@@ -1244,10 +1298,65 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
       : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
 
-    // 店铺链接
-    const shopHtml = item.shop
-      ? `<a class="product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
-      : '';
+    // 价格
+    const priceHtml = `<span class="price-text">${formatPrice(item.price)}</span>`;
+
+    // 起批量
+    let moqHtml = '';
+    if (item.quantity_begin) {
+      moqHtml = `<span class="product-moq">${item.quantity_begin}</span>`;
+    }
+
+    // 销量 + 订单数
+    let salesHtml = '';
+    const salesParts = [];
+    if (item.sale_quantity) {
+      salesParts.push(`<span class="sales-item" title="总件数">📦 ${item.sale_quantity}</span>`);
+    }
+    if (item.booked_count) {
+      salesParts.push(`<span class="sales-item" title="总订单数">📋 ${item.booked_count}</span>`);
+    }
+    if (salesParts.length > 0) {
+      salesHtml = `<div class="product-sales">${salesParts.join('')}</div>`;
+    }
+
+    // 运费 + 揽收时效
+    let deliveryHtml = '';
+    const deliveryParts = [];
+    if (item.price_description) {
+      deliveryParts.push(`<span class="delivery-item" title="运费">🚚 ${item.price_description}</span>`);
+    }
+    if (item.fenxiao_time_limit) {
+      deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
+    }
+    if (deliveryParts.length > 0) {
+      deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
+    }
+
+    // 店铺信息：店名 + 城市 + 开店年限
+    let shopHtml = '';
+    if (item.shop) {
+      const shopUrl = item.win_port_url || item.shop_url || '#';
+      let shopMeta = '';
+      const metaParts = [];
+      if (item.city) {
+        metaParts.push(`<span class="shop-city">📍 ${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="shop-year">🏪 ${item.shop_year}</span>`);
+      }
+      if (metaParts.length > 0) {
+        shopMeta = `<div class="shop-meta">${metaParts.join('')}</div>`;
+      }
+      shopHtml = `
+        <div class="product-shop-wrapper">
+          <a class="product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+            ${item.shop}
+          </a>
+          ${shopMeta}
+        </div>
+      `;
+    }
 
     card.innerHTML = `
       <div class="product-img">
@@ -1257,9 +1366,12 @@
       </div>
       <div class="product-body">
         <a class="product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
-        <div class="product-price">
-          <span class="price-text">${formatPrice(item.price)}</span>
+        <div class="product-price-row">
+          ${priceHtml}
+          ${moqHtml}
         </div>
+        ${salesHtml}
+        ${deliveryHtml}
         ${shopHtml}
       </div>
     `;
