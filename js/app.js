@@ -16,6 +16,7 @@
     'https://macintosh-executives-til-performer.trycloudflare.com',
     'https://cdt-registry-proudly-individuals.trycloudflare.com',
     'https://farm-leads-discusses-generating.trycloudflare.com',
+    'https://quilt-discounts-golf-upgrades.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
