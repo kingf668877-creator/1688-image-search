@@ -7,8 +7,9 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://dianleida.pythonanywhere.com';
+  const DEFAULT_API_BASE = 'https://generator-context-terrorism-junior.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
+    'https://dianleida.pythonanywhere.com',
     'https://192.168.1.35:5443',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
