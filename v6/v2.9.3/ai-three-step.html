@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>图搜批量寻源</title>
+<link rel="icon" type="image/png" href="logo.png">
+<link rel="stylesheet" href="ai-three-step.css">
+</head>
+<body>
+
+<!-- ===== 页面主体 ===== -->
+<div class="app-container">
+
+  <!-- 左侧侧边栏 -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <div class="logo-icon">🔍</div>
+      <div class="logo-text" data-editable data-edit-label="侧边栏标题">图搜批量寻源</div>
+    </div>
+
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-label">功能导航</div>
+        <button class="nav-item active" data-main-tab="create">
+          <span class="nav-icon">📤</span>
+          <span class="nav-text" data-editable data-edit-label="导航创建">创建图搜寻源</span>
+        </button>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">
+          <span>任务列表</span>
+          <span class="nav-badge nav-badge-sm" id="taskBadge">5</span>
+        </div>
+        <div class="task-sidebar-list" id="sidebarTaskList">
+          <!-- JS 渲染任务列表 -->
+        </div>
+      </div>
+
+      <div class="nav-section">
+        <div class="nav-label">使用帮助</div>
+        <button class="nav-item nav-item-sub">
+          <span class="nav-icon">📖</span>
+          <span class="nav-text">操作指南</span>
+        </button>
+        <button class="nav-item nav-item-sub">
+          <span class="nav-icon">❓</span>
+          <span class="nav-text">常见问题</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-info">
+        <div class="user-avatar">店</div>
+        <div class="user-detail">
+          <div class="user-name">店雷达用户</div>
+          <div class="user-role">标准版</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- 右侧主内容 -->
+  <div class="main-wrapper">
+
+    <!-- 顶部栏 -->
+    <header class="top-bar">
+      <div class="top-bar-left">
+        <nav class="breadcrumb">
+          <span>图搜批量寻源</span>
+          <span class="breadcrumb-sep">/</span>
+          <span class="breadcrumb-current" id="breadcrumbCurrent">创建图搜寻源</span>
+        </nav>
+      </div>
+      <div class="top-bar-right">
+        <button class="top-bar-btn" title="刷新">🔄</button>
+        <button class="top-bar-btn" title="通知">🔔</button>
+        <button class="btn btn-primary top-create-btn" id="createTaskBtn">
+          <span>+</span>
+          <span>创建任务</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- 内容区域 -->
+    <main class="page-content">
+
+    <!-- ========== 创建图搜寻源 Tab ========== -->
+    <section class="main-panel active" id="panel-create">
+      <div class="create-card">
+        <div class="card-header">
+          <h2 class="card-title" data-editable data-edit-label="创建卡片标题">创建图搜寻源</h2>
+          <p class="card-desc">填写任务信息，选择图搜方式，开始批量寻源</p>
+        </div>
+
+        <div class="card-body">
+          <!-- 任务名称 -->
+          <div class="form-item">
+            <div class="form-label">
+              <span class="required">*</span>
+              <span data-editable data-edit-label="任务名称标签">任务名称</span>
+            </div>
+            <input class="form-input" type="text" id="taskNameInput" placeholder="请输入任务名称，方便后续查找" value="22">
+          </div>
+
+          <!-- 图搜方式 -->
+          <div class="form-item">
+            <div class="form-label" data-editable data-edit-label="图搜方式标签">图搜方式</div>
+
+            <div class="search-tabs" role="tablist">
+              <button class="tab-btn active" data-tab="link" role="tab">
+                <span class="tab-icon">🔗</span>
+                <span>图片链接</span>
+              </button>
+              <button class="tab-btn" data-tab="file" role="tab">
+                <span class="tab-icon">📋</span>
+                <span>文件上传</span>
+              </button>
+              <button class="tab-btn" data-tab="image" role="tab">
+                <span class="tab-icon">🖼️</span>
+                <span>上传图片</span>
+              </button>
+            </div>
+
+            <!-- 图片链接 Tab -->
+            <div class="tab-panel active" id="panel-link">
+              <div class="link-upload-wrap">
+                <p class="panel-hint">每行粘贴一个图片URL地址，支持 http/https 链接，最多 1000 条</p>
+                <textarea id="linkTextarea" class="url-textarea" placeholder="https://example.com/img1.jpg&#10;https://example.com/img2.png&#10;https://example.com/img3.webp&#10;..." rows="8"></textarea>
+                <div class="link-actions">
+                  <button class="btn btn-ghost" id="clearLinkBtn">
+                    <span>清空</span>
+                  </button>
+                  <button class="btn btn-outline" id="parseLinkBtn">
+                    <span>解析链接</span>
+                  </button>
+                </div>
+                <!-- 链接预览网格 -->
+                <div class="link-preview" id="linkPreview" style="display: none;">
+                  <div class="file-list-header">
+                    <span>链接预览</span>
+                    <span class="file-count" id="linkCount">0 条</span>
+                  </div>
+                  <div class="link-thumb-grid" id="linkThumbGrid"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 文件上传 Tab -->
+            <div class="tab-panel" id="panel-file">
+              <!-- 上传前状态 -->
+              <div id="fileUploadEmpty">
+                <div class="upload-area" id="fileDropZone">
+                  <div class="upload-icon">
+                    <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M32 42V14M32 14L20 26M32 14L44 26" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                      <path d="M12 34v12a6 6 0 006 6h28a6 6 0 006-6V34" stroke="currentColor" stroke-width="3" stroke-linecap="round"/>
+                    </svg>
+                  </div>
+                  <div class="upload-title">点击或将文件拖拽到此处<em>上传</em></div>
+                  <div class="upload-desc">支持 xlsx、xls 格式，单个文件不超过 30M，最多 1000 条</div>
+                  <input type="file" class="hidden-input" id="fileInput" accept=".xlsx,.xls">
+                </div>
+                <div class="file-actions">
+                  <span></span>
+                  <button class="btn-download-template">
+                    <span class="dl-icon">⬇</span>
+                    <span data-editable data-edit-label="下载模板按钮">下载模板</span>
+                  </button>
+                </div>
+                <div class="tip-box" data-editable data-edit-label="文件上传说明">
+                  <strong>导入说明：</strong><br>
+                  1. 本功能支持1000条图片链接批量寻源；<br>
+                  2. 请先下载模板文件，按格式要求填写内容；<br>
+                  3. 导入格式为xlsx/xls（手动修改文件后缀无效），行数不超过1000张，文件大小不超过30M。
+                </div>
+              </div>
+
+              <!-- 上传中状态 -->
+              <div id="fileUploading" style="display:none;">
+                <div class="upload-progress">
+                  <div class="progress-head">
+                    <span id="uploadingFileName">正在上传...</span>
+                    <span id="uploadingPercent">0%</span>
+                  </div>
+                  <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill"></div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- 上传成功状态 -->
+              <div id="fileUploaded" style="display:none;">
+                <div class="file-selected">
+                  <div class="file-icon">XLS</div>
+                  <div class="file-info">
+                    <div class="file-name" id="selectedFileName">店雷达 1688选品库-近30天 2026-08-03 174118.xls</div>
+                    <div class="file-meta" id="selectedFileMeta">2.4 MB · 328 条数据</div>
+                  </div>
+                  <div class="file-status">
+                    <span class="status-dot">✓</span>
+                    <span>已选择</span>
+                  </div>
+                  <button class="file-remove" id="removeFileBtn" title="移除">✕</button>
+                </div>
+              </div>
+
+              <!-- 上传失败状态 -->
+              <div id="fileUploadError" style="display:none;">
+                <div class="file-selected" style="background: var(--danger-bg); border-color: #ffd8d6;">
+                  <div class="file-icon" style="background: linear-gradient(135deg, var(--danger), #ff7875);">XLS</div>
+                  <div class="file-info">
+                    <div class="file-name" style="color: var(--danger);">店雷达 1688选品库-近30天 2026-08-03 174118.xls</div>
+                    <div class="file-meta" style="color: var(--danger);">模板格式异常，详细原因：图片链接校验失败</div>
+                  </div>
+                  <button class="file-remove" id="removeErrorFileBtn" title="移除">✕</button>
+                </div>
+                <div class="file-error-tip">
+                  <span class="err-icon">⚠️</span>
+                  <span data-editable data-edit-label="文件错误提示">模板格式异常，详细原因：图片链接校验失败，请检查模板格式后重新上传。</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 上传图片 Tab -->
+            <div class="tab-panel" id="panel-image">
+              <div class="image-upload-grid" id="imageGrid">
+                <div class="image-upload-item" id="imageUploadBtn" title="点击上传图片">
+                  <span class="plus">+</span>
+                  <span class="upload-text">上传图片</span>
+                  <input type="file" class="hidden-input" id="imageInput" accept="image/*" multiple>
+                </div>
+              </div>
+              <div class="image-count-tip">
+                已上传 <span id="imageCount">0</span> / 1000 张
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-footer">
+          <button class="btn btn-default" id="resetBtn">重置</button>
+          <button class="btn btn-primary" id="submitBtn">
+            <span class="btn-icon">🚀</span>
+            <span>开始执行</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========== 任务详情面板 ========== -->
+    <section class="main-panel" id="panel-detail">
+      <!-- 空状态 -->
+      <div class="detail-empty" id="detailEmpty">
+        <div class="detail-empty-icon">📋</div>
+        <div class="detail-empty-title">选择一个任务查看详情</div>
+        <div class="detail-empty-desc">从左侧任务列表中选择一个任务，即可查看寻源进度和结果</div>
+      </div>
+
+      <!-- 任务详情内容 -->
+      <div class="detail-content" id="detailContent" style="display:none;">
+        <!-- 任务信息卡片 -->
+        <div class="detail-header-card">
+          <div class="detail-header-left">
+            <h2 class="detail-task-name" id="detailTaskName">-</h2>
+            <div class="detail-task-meta">
+              <span class="detail-type-tag" id="detailTypeTag">-</span>
+              <span class="detail-status-tag" id="detailStatusTag">-</span>
+              <span class="detail-time">创建于 <span id="detailCreateTime">-</span></span>
+            </div>
+          </div>
+          <div class="detail-header-right">
+            <button class="btn btn-default" id="detailRefreshBtn">🔄 刷新</button>
+            <button class="btn btn-primary" id="detailBackBtn">← 返回列表</button>
+          </div>
+        </div>
+
+        <!-- 进度概览 -->
+        <div class="progress-overview-card">
+          <div class="progress-stat">
+            <div class="progress-stat-num" id="progressNum">0%</div>
+            <div class="progress-stat-label">寻源进度</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-num" id="finishedNum">0</div>
+            <div class="progress-stat-label">已寻源</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-num" id="totalNum">0</div>
+            <div class="progress-stat-label">总数</div>
+          </div>
+          <div class="progress-stat">
+            <div class="progress-stat-num" id="failedNum">0</div>
+            <div class="progress-stat-label">失败</div>
+          </div>
+          <div class="progress-bar-wrap">
+            <div class="progress-bar-large">
+              <div class="progress-fill-large" id="progressFillLarge" style="width: 0%;"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 结果筛选 -->
+        <div class="result-filter-card">
+          <div class="result-tabs">
+            <button class="result-tab active" data-result="all">
+              全部结果 <span class="result-count" id="resultAllCount">0</span>
+            </button>
+            <button class="result-tab" data-result="success">
+              寻源成功 <span class="result-count success" id="resultSuccessCount">0</span>
+            </button>
+            <button class="result-tab" data-result="failed">
+              寻源失败 <span class="result-count failed" id="resultFailedCount">0</span>
+            </button>
+          </div>
+          <div class="result-search">
+            <input class="form-input" type="text" placeholder="搜索商品名称..." id="resultSearchInput">
+          </div>
+        </div>
+
+        <!-- 寻源结果网格 -->
+        <div class="result-grid" id="resultGrid">
+          <!-- JS 渲染寻源结果 -->
+        </div>
+
+        <!-- 结果分页 -->
+        <div class="pagination">
+          <div class="pagination-left">
+            <span>每页显示</span>
+            <select class="form-input page-size" id="resultPageSize">
+              <option value="12">12</option>
+              <option value="24" selected>24</option>
+              <option value="48">48</option>
+            </select>
+            <span>条</span>
+          </div>
+          <div class="pagination-right">
+            <button class="page-btn" disabled>上一页</button>
+            <button class="page-btn active">1</button>
+            <button class="page-btn">2</button>
+            <button class="page-btn">3</button>
+            <button class="page-btn">下一页</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    </main>
+  </div>
+</div>
+
+<!-- ===== 查看详情弹窗 ===== -->
+<div class="modal-overlay" id="detailModal" style="display:none;">
+  <div class="modal detail-modal">
+    <div class="modal-header">
+      <span class="modal-title">任务详情</span>
+      <button class="modal-close" id="detailCloseBtn">✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="detail-section">
+        <div class="detail-row">
+          <span class="detail-label">任务名称</span>
+          <span class="detail-value" id="detailName">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">图搜方式</span>
+          <span class="detail-value" id="detailType">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">任务状态</span>
+          <span class="detail-value" id="detailStatus">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">寻源数量</span>
+          <span class="detail-value" id="detailCount">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">创建时间</span>
+          <span class="detail-value" id="detailTime">-</span>
+        </div>
+        <div class="detail-row">
+          <span class="detail-label">完成时间</span>
+          <span class="detail-value" id="detailFinishTime">-</span>
+        </div>
+      </div>
+      <div class="detail-progress">
+        <div class="progress-head">
+          <span>寻源进度</span>
+          <span id="detailProgressText">0%</span>
+        </div>
+        <div class="progress-bar">
+          <div class="progress-fill" id="detailProgressBar" style="width: 0%;"></div>
+        </div>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-default" id="detailCloseBtn2">关闭</button>
+      <button class="btn btn-primary" id="viewResultBtn">查看寻源结果 →</button>
+    </div>
+  </div>
+</div>
+
+<!-- 编辑工具栏 -->
+<div class="edit-toolbar">
+  <button class="edit-btn primary" id="editModeBtn">编辑模式</button>
+  <button class="edit-btn" id="resetEditBtn" disabled>重置修改</button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="ai-three-step.js"></script>
+</body>
+</html>
