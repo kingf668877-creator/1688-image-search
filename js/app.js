@@ -645,65 +645,112 @@
       let uploadData;
 
       if (state.currentTab === 'link') {
-        // 链接方式：分块上传URL，避免单次请求超时
+        // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
+        const totalUrls = urls.length;
         const CHUNK_SIZE = 50; // 每批50个URL
-        const totalChunks = Math.ceil(urls.length / CHUNK_SIZE);
+        const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
         let taskId = null;
         let totalUploaded = 0;
         let totalFailed = 0;
         let allFailedFiles = [];
+        let streamingStarted = false;
 
-        for (let chunkIdx = 0; chunkIdx < totalChunks; chunkIdx++) {
-          const chunkStart = chunkIdx * CHUNK_SIZE;
-          const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, urls.length);
-          const chunkUrls = urls.slice(chunkStart, chunkEnd);
+        // 上传第一批并启动流式搜索
+        const firstChunkUrls = urls.slice(0, CHUNK_SIZE);
+        const isFirstOnly = totalChunks === 1;
 
-          // 更新进度提示
-          if (totalChunks > 1) {
-            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${chunkEnd}/${urls.length} 张...（第${chunkIdx + 1}/${totalChunks}批）</span>`;
-          } else {
-            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${urls.length} 张图片...</span>`;
+        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${Math.min(CHUNK_SIZE, totalUrls)}/${totalUrls} 张并启动搜索...</span>`;
+
+        const firstController = new AbortController();
+        const firstTimeoutId = setTimeout(() => firstController.abort(), 180000);
+        const firstRes = await fetch(api('/api/upload_urls'), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            urls: firstChunkUrls,
+            auto_search: true,
+            expected_total: totalUrls,
+            is_last_batch: isFirstOnly,
+          }),
+          signal: firstController.signal,
+        });
+        clearTimeout(firstTimeoutId);
+
+        const firstData = await firstRes.json();
+        if (!firstRes.ok) throw new Error(firstData.error || 'URL上传失败');
+
+        taskId = firstData.task_id;
+        totalUploaded = firstData.total_uploaded || firstData.uploaded_count;
+        totalFailed += firstData.failed_count || 0;
+        if (firstData.failed_files) allFailedFiles = allFailedFiles.concat(firstData.failed_files);
+        streamingStarted = firstData.is_streaming || firstData.status === 'searching';
+
+        state.taskId = taskId;
+
+        // 显示上传接口耗时（第一批完成，搜索已启动）
+        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+        el.uploadTiming.style.display = 'flex';
+        el.uploadTimingValue.textContent = `${uploadDuration} 秒（第一批已启动搜索）`;
+
+        // 显示进度并开始轮询
+        showProgress();
+        updateProgress({
+          status: 'searching',
+          message: `边下载边搜索中... 已下载 ${totalUploaded}/${totalUrls} 张`,
+          current: firstData.searched_count || 0,
+          total: totalUrls,
+          downloaded_count: totalUploaded,
+          searched_count: firstData.searched_count || 0,
+          is_streaming: true,
+        });
+
+        startPolling();
+
+        // 后台继续上传剩余批次
+        if (totalChunks > 1) {
+          uploadRemainingChunks();
+        }
+
+        async function uploadRemainingChunks() {
+          for (let chunkIdx = 1; chunkIdx < totalChunks; chunkIdx++) {
+            const chunkStart = chunkIdx * CHUNK_SIZE;
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, totalUrls);
+            const chunkUrls = urls.slice(chunkStart, chunkEnd);
+            const isLast = chunkIdx === totalChunks - 1;
+
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 180000);
+              const res = await fetch(api('/api/upload_urls'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  urls: chunkUrls,
+                  task_id: taskId,
+                  expected_total: totalUrls,
+                  is_last_batch: isLast,
+                }),
+                signal: controller.signal,
+              });
+              clearTimeout(timeoutId);
+
+              const chunkData = await res.json();
+              if (!res.ok) {
+                console.warn(`第${chunkIdx + 1}批上传失败:`, chunkData.error);
+                continue;
+              }
+
+              totalUploaded = chunkData.total_uploaded || totalUploaded + chunkData.uploaded_count;
+              totalFailed += chunkData.failed_count || 0;
+              if (chunkData.failed_files) allFailedFiles = allFailedFiles.concat(chunkData.failed_files);
+
+              console.log(`第${chunkIdx + 1}/${totalChunks}批上传完成，累计 ${totalUploaded} 张`);
+            } catch (err) {
+              console.warn(`第${chunkIdx + 1}批上传异常:`, err);
+            }
           }
-
-          // 每批请求超时3分钟
-          const controller = new AbortController();
-          const timeoutId = setTimeout(() => controller.abort(), 180000);
-
-          const requestBody = { urls: chunkUrls };
-          if (taskId) requestBody.task_id = taskId; // 增量上传
-
-          let res;
-          try {
-            res = await fetch(api('/api/upload_urls'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(requestBody),
-              signal: controller.signal,
-            });
-          } catch (fetchErr) {
-            // 网络错误时重试一次
-            clearTimeout(timeoutId);
-            console.warn(`第${chunkIdx + 1}批上传失败，重试中...`, fetchErr);
-            const retryController = new AbortController();
-            const retryTimeoutId = setTimeout(() => retryController.abort(), 180000);
-            res = await fetch(api('/api/upload_urls'), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(requestBody),
-              signal: retryController.signal,
-            });
-            clearTimeout(retryTimeoutId);
-          }
-          clearTimeout(timeoutId);
-
-          const chunkData = await res.json();
-          if (!res.ok) throw new Error(chunkData.error || 'URL上传失败');
-
-          taskId = chunkData.task_id;
-          totalUploaded = chunkData.total_uploaded || (totalUploaded + chunkData.uploaded_count);
-          totalFailed += chunkData.failed_count || 0;
-          if (chunkData.failed_files) allFailedFiles = allFailedFiles.concat(chunkData.failed_files);
+          console.log(`全部批次上传完成，共成功 ${totalUploaded} 张，失败 ${totalFailed} 张`);
         }
 
         uploadData = {
@@ -730,34 +777,34 @@
         clearTimeout(timeoutId);
         uploadData = await res.json();
         if (!res.ok) throw new Error(uploadData.error || '上传失败');
+
+        // 显示上传接口耗时
+        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+        el.uploadTiming.style.display = 'flex';
+        el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
+
+        state.taskId = uploadData.task_id;
+
+        showProgress();
+        updateProgress({
+          status: 'queued',
+          message: '任务已启动，正在初始化...',
+          current: 0,
+          total: uploadData.uploaded_count,
+        });
+
+        // 启动搜索
+        const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
+        const searchData = await searchRes.json();
+        if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
+
+        startPolling();
       }
-
-      // 显示上传接口耗时
-      const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-      el.uploadTiming.style.display = 'flex';
-      el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
-
-      state.taskId = uploadData.task_id;
 
       // 若有失败链接，提示
       if (uploadData.failed_count && uploadData.failed_count > 0) {
         console.warn(`有 ${uploadData.failed_count} 个链接下载失败`, uploadData.failed_files);
       }
-
-      showProgress();
-      updateProgress({
-        status: 'queued',
-        message: '任务已启动，正在初始化...',
-        current: 0,
-        total: uploadData.uploaded_count,
-      });
-
-      // 启动搜索
-      const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
-      const searchData = await searchRes.json();
-      if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
-
-      startPolling();
     } catch (error) {
       console.error('搜索启动失败:', error);
       let errMsg = error.message;
@@ -791,14 +838,34 @@
     };
     el.progressStatus.textContent = statusMap[data.status] || data.status;
 
-    const current = data.current || 0;
+    const isStreaming = data.is_streaming;
+    const downloaded = data.downloaded_count !== undefined ? data.downloaded_count : (data.current || 0);
+    const searched = data.searched_count !== undefined ? data.searched_count : (data.current || 0);
     const total = data.total || 0;
-    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
 
-    el.progressFill.style.width = percent + '%';
-    el.progressCurrent.textContent = current;
-    el.progressTotal.textContent = total;
-    el.progressPercent.textContent = percent + '%';
+    if (isStreaming && data.downloaded_count !== undefined && data.searched_count !== undefined) {
+      // 流式搜索：显示双进度条（下载 + 搜索）
+      const downloadPercent = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+      const searchPercent = total > 0 ? Math.round((searched / total) * 100) : 0;
+
+      // 主进度条显示搜索进度
+      el.progressFill.style.width = searchPercent + '%';
+      el.progressCurrent.textContent = searched;
+      el.progressTotal.textContent = total;
+      el.progressPercent.textContent = searchPercent + '%';
+
+      // 在状态文字中显示下载进度
+      el.progressStatus.textContent = `边下载边搜索中 · 下载 ${downloaded}/${total} · 搜索 ${searched}/${total}`;
+    } else {
+      // 普通模式
+      const current = data.current || 0;
+      const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+      el.progressFill.style.width = percent + '%';
+      el.progressCurrent.textContent = current;
+      el.progressTotal.textContent = total;
+      el.progressPercent.textContent = percent + '%';
+    }
 
     if (data.message) {
       const match = data.message.match(/正在搜索: (.+?) \(/);
