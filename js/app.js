@@ -1321,6 +1321,11 @@
 
   function openSettings() {
     el.apiBaseInput.value = getApiBase();
+    // 动态更新提示文本，确保显示当前默认地址
+    const hint = document.getElementById('apiHint');
+    if (hint) {
+      hint.innerHTML = `默认公网后端：<br><code>${DEFAULT_API_BASE}</code><br>网页首次打开会自动使用该地址，无需手动设置。`;
+    }
     el.settingsModal.style.display = 'flex';
     checkConnection();
   }
