@@ -7,11 +7,14 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://macintosh-executives-til-performer.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://192.168.1.35:5443';
   const LEGACY_API_BASES = new Set([
     'https://dianleida.pythonanywhere.com',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
+    'https://macintosh-executives-til-performer.trycloudflare.com',
+    'https://cdt-registry-proudly-individuals.trycloudflare.com',
+    'https://farm-leads-discusses-generating.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
@@ -32,6 +35,9 @@
 
   // 列表行中最多直接展示的商品数，超出则点"查看更多"
   const ROW_PREVIEW_LIMIT = 5;
+  // 预览网格懒加载：初始渲染数量和每次增量
+  const PREVIEW_INITIAL = 30;
+  const PREVIEW_INCREMENT = 30;
 
   // ====== 全局状态 ======
   const state = {
@@ -42,6 +48,9 @@
     taskId: null,
     pollingTimer: null,
     results: null,
+    // 懒加载渲染计数
+    fileVisibleCount: PREVIEW_INITIAL,
+    urlVisibleCount: PREVIEW_INITIAL,
     // 分页状态
     pagination: {
       currentPage: 1,
@@ -230,6 +239,7 @@
         state.files.push(file);
       }
     }
+    state.fileVisibleCount = PREVIEW_INITIAL;
     renderFileList();
     updateButtons();
   }
@@ -242,6 +252,7 @@
 
   function clearFiles() {
     state.files = [];
+    state.fileVisibleCount = PREVIEW_INITIAL;
     renderFileList();
     updateButtons();
   }
@@ -255,12 +266,15 @@
     el.fileCount.textContent = `${state.files.length} 张`;
     el.fileGrid.innerHTML = '';
 
-    state.files.forEach((file, index) => {
+    // 懒加载：只渲染前 fileVisibleCount 个
+    const visible = state.files.slice(0, state.fileVisibleCount);
+    visible.forEach((file, index) => {
       const item = document.createElement('div');
       item.className = 'file-item';
 
       const img = document.createElement('img');
       img.alt = file.name;
+      img.loading = 'lazy';
       const reader = new FileReader();
       reader.onload = (e) => { img.src = e.target.result; };
       reader.readAsDataURL(file);
@@ -283,6 +297,18 @@
       item.appendChild(removeBtn);
       el.fileGrid.appendChild(item);
     });
+
+    // 如果还有更多未渲染的，显示"加载更多"按钮
+    if (state.fileVisibleCount < state.files.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.fileVisibleCount} / ${state.files.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.fileVisibleCount += PREVIEW_INCREMENT;
+        renderFileList();
+      });
+      el.fileGrid.appendChild(loadMore);
+    }
   }
 
   // ====== 链接上传 ======
@@ -291,6 +317,7 @@
       el.urlTextarea.value = '';
       el.urlPreview.style.display = 'none';
       el.urlGrid.innerHTML = '';
+      state.urlVisibleCount = PREVIEW_INITIAL;
       updateButtons();
     });
 
@@ -334,47 +361,93 @@
     el.urlPreview.style.display = 'block';
     el.urlCount.textContent = `${urls.length} 条`;
     el.urlGrid.innerHTML = '';
+    state.urlVisibleCount = PREVIEW_INITIAL;
 
-    urls.forEach((url, idx) => {
-      const item = document.createElement('div');
-      item.className = 'file-item url-item';
-      const img = document.createElement('img');
-      img.alt = `链接 ${idx + 1}`;
-      img.src = url;
-      img.onerror = () => {
-        img.style.display = 'none';
-        const fallback = document.createElement('div');
-        fallback.className = 'url-fallback';
-        fallback.textContent = '❌';
-        item.insertBefore(fallback, item.firstChild);
-      };
-      const name = document.createElement('div');
-      name.className = 'file-item-name';
-      // 只显示域名+路径前30字符
-      try {
-        const u = new URL(url);
-        name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
-      } catch {
-        name.textContent = url.slice(0, 40);
-      }
-      const removeBtn = document.createElement('div');
-      removeBtn.className = 'file-item-remove';
-      removeBtn.innerHTML = '×';
-      removeBtn.title = '移除该链接';
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
-        el.urlTextarea.value = lines.join('\n');
-        previewUrls();
-      });
-
-      item.appendChild(img);
-      item.appendChild(name);
-      item.appendChild(removeBtn);
+    // 懒加载：只渲染前 urlVisibleCount 个
+    const visible = urls.slice(0, state.urlVisibleCount);
+    visible.forEach((url, idx) => {
+      const item = createUrlPreviewItem(url, idx, urls);
       el.urlGrid.appendChild(item);
     });
 
+    // 如果还有更多未渲染的，显示"加载更多"按钮
+    if (state.urlVisibleCount < urls.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.urlVisibleCount += PREVIEW_INCREMENT;
+        previewUrlsAppend(urls);
+      });
+      el.urlGrid.appendChild(loadMore);
+    }
+
     updateButtons();
+  }
+
+  // 追加渲染更多URL预览项（不重建已有的）
+  function previewUrlsAppend(urls) {
+    // 移除旧的"加载更多"按钮
+    const oldBtn = el.urlGrid.querySelector('.load-more-btn');
+    if (oldBtn) oldBtn.remove();
+
+    const startIdx = state.urlVisibleCount - PREVIEW_INCREMENT;
+    const endIdx = Math.min(state.urlVisibleCount, urls.length);
+    for (let idx = startIdx; idx < endIdx; idx++) {
+      const item = createUrlPreviewItem(urls[idx], idx, urls);
+      el.urlGrid.appendChild(item);
+    }
+
+    if (state.urlVisibleCount < urls.length) {
+      const loadMore = document.createElement('div');
+      loadMore.className = 'load-more-btn';
+      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
+      loadMore.addEventListener('click', () => {
+        state.urlVisibleCount += PREVIEW_INCREMENT;
+        previewUrlsAppend(urls);
+      });
+      el.urlGrid.appendChild(loadMore);
+    }
+  }
+
+  // 创建单个URL预览项
+  function createUrlPreviewItem(url, idx, allUrls) {
+    const item = document.createElement('div');
+    item.className = 'file-item url-item';
+    const img = document.createElement('img');
+    img.alt = `链接 ${idx + 1}`;
+    img.src = url;
+    img.loading = 'lazy';
+    img.onerror = () => {
+      img.style.display = 'none';
+      const fallback = document.createElement('div');
+      fallback.className = 'url-fallback';
+      fallback.textContent = '❌';
+      item.insertBefore(fallback, item.firstChild);
+    };
+    const name = document.createElement('div');
+    name.className = 'file-item-name';
+    try {
+      const u = new URL(url);
+      name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
+    } catch {
+      name.textContent = url.slice(0, 40);
+    }
+    const removeBtn = document.createElement('div');
+    removeBtn.className = 'file-item-remove';
+    removeBtn.innerHTML = '×';
+    removeBtn.title = '移除该链接';
+    removeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
+      el.urlTextarea.value = lines.join('\n');
+      previewUrls();
+    });
+
+    item.appendChild(img);
+    item.appendChild(name);
+    item.appendChild(removeBtn);
+    return item;
   }
 
   // ====== 表格上传 ======
@@ -546,6 +619,8 @@
       else if (state.currentTab === 'link') {
         el.urlTextarea.value = '';
         el.urlPreview.style.display = 'none';
+        el.urlGrid.innerHTML = '';
+        state.urlVisibleCount = PREVIEW_INITIAL;
         updateButtons();
       } else if (state.currentTab === 'table') clearTable();
     });
@@ -561,8 +636,8 @@
       return;
     }
 
+    const totalFiles = getCurrentFileCount();
     el.searchBtn.disabled = true;
-    el.searchBtn.innerHTML = '<span class="btn-icon">⏳</span><span>上传中...</span>';
 
     const uploadStartTime = Date.now();
 
@@ -570,58 +645,173 @@
       let uploadData;
 
       if (state.currentTab === 'link') {
-        // 链接方式：调用 /api/upload_urls
+        // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
-        const res = await fetch(api('/api/upload_urls'), {
+        const totalUrls = urls.length;
+        const CHUNK_SIZE = 50; // 每批50个URL
+        const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
+        let taskId = null;
+        let totalUploaded = 0;
+        let totalFailed = 0;
+        let allFailedFiles = [];
+        let streamingStarted = false;
+
+        // 上传第一批并启动流式搜索
+        const firstChunkUrls = urls.slice(0, CHUNK_SIZE);
+        const isFirstOnly = totalChunks === 1;
+
+        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${Math.min(CHUNK_SIZE, totalUrls)}/${totalUrls} 张并启动搜索...</span>`;
+
+        const firstController = new AbortController();
+        const firstTimeoutId = setTimeout(() => firstController.abort(), 180000);
+        const firstRes = await fetch(api('/api/upload_urls'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls }),
+          body: JSON.stringify({
+            urls: firstChunkUrls,
+            auto_search: true,
+            expected_total: totalUrls,
+            is_last_batch: isFirstOnly,
+          }),
+          signal: firstController.signal,
         });
-        uploadData = await res.json();
-        if (!res.ok) throw new Error(uploadData.error || 'URL上传失败');
+        clearTimeout(firstTimeoutId);
+
+        const firstData = await firstRes.json();
+        if (!firstRes.ok) throw new Error(firstData.error || 'URL上传失败');
+
+        taskId = firstData.task_id;
+        totalUploaded = firstData.total_uploaded || firstData.uploaded_count;
+        totalFailed += firstData.failed_count || 0;
+        if (firstData.failed_files) allFailedFiles = allFailedFiles.concat(firstData.failed_files);
+        streamingStarted = firstData.is_streaming || firstData.status === 'searching';
+
+        state.taskId = taskId;
+
+        // 显示上传接口耗时（第一批完成，搜索已启动）
+        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+        el.uploadTiming.style.display = 'flex';
+        el.uploadTimingValue.textContent = `${uploadDuration} 秒（第一批已启动搜索）`;
+
+        // 显示进度并开始轮询
+        showProgress();
+        updateProgress({
+          status: 'searching',
+          message: `边下载边搜索中... 已下载 ${totalUploaded}/${totalUrls} 张`,
+          current: firstData.searched_count || 0,
+          total: totalUrls,
+          downloaded_count: totalUploaded,
+          searched_count: firstData.searched_count || 0,
+          is_streaming: true,
+        });
+
+        startPolling();
+
+        // 后台继续上传剩余批次
+        if (totalChunks > 1) {
+          uploadRemainingChunks();
+        }
+
+        async function uploadRemainingChunks() {
+          for (let chunkIdx = 1; chunkIdx < totalChunks; chunkIdx++) {
+            const chunkStart = chunkIdx * CHUNK_SIZE;
+            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, totalUrls);
+            const chunkUrls = urls.slice(chunkStart, chunkEnd);
+            const isLast = chunkIdx === totalChunks - 1;
+
+            try {
+              const controller = new AbortController();
+              const timeoutId = setTimeout(() => controller.abort(), 180000);
+              const res = await fetch(api('/api/upload_urls'), {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  urls: chunkUrls,
+                  task_id: taskId,
+                  expected_total: totalUrls,
+                  is_last_batch: isLast,
+                }),
+                signal: controller.signal,
+              });
+              clearTimeout(timeoutId);
+
+              const chunkData = await res.json();
+              if (!res.ok) {
+                console.warn(`第${chunkIdx + 1}批上传失败:`, chunkData.error);
+                continue;
+              }
+
+              totalUploaded = chunkData.total_uploaded || totalUploaded + chunkData.uploaded_count;
+              totalFailed += chunkData.failed_count || 0;
+              if (chunkData.failed_files) allFailedFiles = allFailedFiles.concat(chunkData.failed_files);
+
+              console.log(`第${chunkIdx + 1}/${totalChunks}批上传完成，累计 ${totalUploaded} 张`);
+            } catch (err) {
+              console.warn(`第${chunkIdx + 1}批上传异常:`, err);
+            }
+          }
+          console.log(`全部批次上传完成，共成功 ${totalUploaded} 张，失败 ${totalFailed} 张`);
+        }
+
+        uploadData = {
+          task_id: taskId,
+          uploaded_count: totalUploaded,
+          failed_count: totalFailed,
+          failed_files: allFailedFiles,
+        };
       } else {
         // 批量 / 表格方式：调用 /api/upload
         const files = state.currentTab === 'batch' ? state.files : getTableFiles();
+        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在上传 ${files.length} 张图片...</span>`;
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
 
+        // 文件上传超时（10分钟）
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 600000);
         const res = await fetch(api('/api/upload'), {
           method: 'POST',
           body: formData,
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
         uploadData = await res.json();
         if (!res.ok) throw new Error(uploadData.error || '上传失败');
+
+        // 显示上传接口耗时
+        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+        el.uploadTiming.style.display = 'flex';
+        el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
+
+        state.taskId = uploadData.task_id;
+
+        showProgress();
+        updateProgress({
+          status: 'queued',
+          message: '任务已启动，正在初始化...',
+          current: 0,
+          total: uploadData.uploaded_count,
+        });
+
+        // 启动搜索
+        const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
+        const searchData = await searchRes.json();
+        if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
+
+        startPolling();
       }
-
-      // 显示上传接口耗时
-      const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-      el.uploadTiming.style.display = 'flex';
-      el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
-
-      state.taskId = uploadData.task_id;
 
       // 若有失败链接，提示
       if (uploadData.failed_count && uploadData.failed_count > 0) {
         console.warn(`有 ${uploadData.failed_count} 个链接下载失败`, uploadData.failed_files);
       }
-
-      showProgress();
-      updateProgress({
-        status: 'queued',
-        message: '任务已启动，正在初始化...',
-        current: 0,
-        total: uploadData.uploaded_count,
-      });
-
-      // 启动搜索
-      const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
-      const searchData = await searchRes.json();
-      if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
-
-      startPolling();
     } catch (error) {
       console.error('搜索启动失败:', error);
-      alert('启动失败: ' + error.message);
+      let errMsg = error.message;
+      if (error.name === 'AbortError') {
+        errMsg = '上传超时，请检查网络连接或减少图片数量后重试';
+      }
+      alert('启动失败: ' + errMsg);
       el.searchBtn.disabled = false;
       el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
     }
@@ -648,14 +838,34 @@
     };
     el.progressStatus.textContent = statusMap[data.status] || data.status;
 
-    const current = data.current || 0;
+    const isStreaming = data.is_streaming;
+    const downloaded = data.downloaded_count !== undefined ? data.downloaded_count : (data.current || 0);
+    const searched = data.searched_count !== undefined ? data.searched_count : (data.current || 0);
     const total = data.total || 0;
-    const percent = total > 0 ? Math.round((current / total) * 100) : 0;
 
-    el.progressFill.style.width = percent + '%';
-    el.progressCurrent.textContent = current;
-    el.progressTotal.textContent = total;
-    el.progressPercent.textContent = percent + '%';
+    if (isStreaming && data.downloaded_count !== undefined && data.searched_count !== undefined) {
+      // 流式搜索：显示双进度条（下载 + 搜索）
+      const downloadPercent = total > 0 ? Math.round((downloaded / total) * 100) : 0;
+      const searchPercent = total > 0 ? Math.round((searched / total) * 100) : 0;
+
+      // 主进度条显示搜索进度
+      el.progressFill.style.width = searchPercent + '%';
+      el.progressCurrent.textContent = searched;
+      el.progressTotal.textContent = total;
+      el.progressPercent.textContent = searchPercent + '%';
+
+      // 在状态文字中显示下载进度
+      el.progressStatus.textContent = `边下载边搜索中 · 下载 ${downloaded}/${total} · 搜索 ${searched}/${total}`;
+    } else {
+      // 普通模式
+      const current = data.current || 0;
+      const percent = total > 0 ? Math.round((current / total) * 100) : 0;
+
+      el.progressFill.style.width = percent + '%';
+      el.progressCurrent.textContent = current;
+      el.progressTotal.textContent = total;
+      el.progressPercent.textContent = percent + '%';
+    }
 
     if (data.message) {
       const match = data.message.match(/正在搜索: (.+?) \(/);
@@ -951,10 +1161,34 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">`
       : '<div class="mini-img-placeholder">无图</div>';
 
-    // 店铺链接
-    const shopHtml = item.shop
-      ? `<a class="mini-product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
-      : '';
+    // 起批量
+    let moqHtml = '';
+    if (item.quantity_begin) {
+      moqHtml = `<span class="mini-moq">${item.quantity_begin}</span>`;
+    }
+
+    // 销量
+    let salesHtml = '';
+    if (item.sale_quantity || item.booked_count) {
+      const saleText = item.sale_quantity || item.booked_count;
+      salesHtml = `<div class="mini-sales">📦 ${saleText}</div>`;
+    }
+
+    // 店铺 + 城市
+    let shopHtml = '';
+    if (item.shop) {
+      const shopUrl = item.win_port_url || item.shop_url || '#';
+      let cityHtml = '';
+      if (item.city) {
+        cityHtml = `<span class="mini-shop-city">· ${item.city}</span>`;
+      }
+      shopHtml = `
+        <div class="mini-product-shop-row">
+          <a class="mini-product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>
+          ${cityHtml}
+        </div>
+      `;
+    }
 
     card.innerHTML = `
       <div class="mini-product-img">
@@ -963,7 +1197,11 @@
       </div>
       <div class="mini-product-body">
         <a class="mini-product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
-        <div class="mini-product-price">${formatPrice(item.price)}</div>
+        <div class="mini-price-row">
+          <span class="mini-product-price">${formatPrice(item.price)}</span>
+          ${moqHtml}
+        </div>
+        ${salesHtml}
         ${shopHtml}
       </div>
     `;
@@ -1024,7 +1262,6 @@
     if (item.similarity !== undefined && item.similarity !== null) {
       const sim = item.similarity;
       const displaySim = Number(sim).toFixed(2);
-      // 进度条：值越小越相似
       const simPercent = Math.max(0, Math.min(100, (2 - sim) / 2 * 100));
       simBadge = `<div class="similarity-badge" style="background:#ff6a00;">${displaySim}</div>`;
       simBar = `<div class="similarity-bar" style="width: ${simPercent}%; background: linear-gradient(90deg, #ff6a00, #ffaa00)"></div>`;
@@ -1034,10 +1271,65 @@
       ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.parentElement.innerHTML='<div style=\\'padding:20px;text-align:center;color:#999;\\'>加载失败</div>'">`
       : '<div style="padding:20px;text-align:center;color:#999;">无图</div>';
 
-    // 店铺链接
-    const shopHtml = item.shop
-      ? `<a class="product-shop" href="${item.shop_url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>`
-      : '';
+    // 价格
+    const priceHtml = `<span class="price-text">${formatPrice(item.price)}</span>`;
+
+    // 起批量
+    let moqHtml = '';
+    if (item.quantity_begin) {
+      moqHtml = `<span class="product-moq">${item.quantity_begin}</span>`;
+    }
+
+    // 销量 + 订单数
+    let salesHtml = '';
+    const salesParts = [];
+    if (item.sale_quantity) {
+      salesParts.push(`<span class="sales-item" title="总件数">📦 ${item.sale_quantity}</span>`);
+    }
+    if (item.booked_count) {
+      salesParts.push(`<span class="sales-item" title="总订单数">📋 ${item.booked_count}</span>`);
+    }
+    if (salesParts.length > 0) {
+      salesHtml = `<div class="product-sales">${salesParts.join('')}</div>`;
+    }
+
+    // 运费 + 揽收时效
+    let deliveryHtml = '';
+    const deliveryParts = [];
+    if (item.price_description) {
+      deliveryParts.push(`<span class="delivery-item" title="运费">🚚 ${item.price_description}</span>`);
+    }
+    if (item.fenxiao_time_limit) {
+      deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
+    }
+    if (deliveryParts.length > 0) {
+      deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
+    }
+
+    // 店铺信息：店名 + 城市 + 开店年限
+    let shopHtml = '';
+    if (item.shop) {
+      const shopUrl = item.win_port_url || item.shop_url || '#';
+      let shopMeta = '';
+      const metaParts = [];
+      if (item.city) {
+        metaParts.push(`<span class="shop-city">📍 ${item.city}</span>`);
+      }
+      if (item.shop_year) {
+        metaParts.push(`<span class="shop-year">🏪 ${item.shop_year}</span>`);
+      }
+      if (metaParts.length > 0) {
+        shopMeta = `<div class="shop-meta">${metaParts.join('')}</div>`;
+      }
+      shopHtml = `
+        <div class="product-shop-wrapper">
+          <a class="product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">
+            ${item.shop}
+          </a>
+          ${shopMeta}
+        </div>
+      `;
+    }
 
     card.innerHTML = `
       <div class="product-img">
@@ -1047,9 +1339,12 @@
       </div>
       <div class="product-body">
         <a class="product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
-        <div class="product-price">
-          <span class="price-text">${formatPrice(item.price)}</span>
+        <div class="product-price-row">
+          ${priceHtml}
+          ${moqHtml}
         </div>
+        ${salesHtml}
+        ${deliveryHtml}
         ${shopHtml}
       </div>
     `;
@@ -1089,6 +1384,7 @@
     clearFiles();
     el.urlTextarea.value = '';
     el.urlPreview.style.display = 'none';
+    state.urlVisibleCount = PREVIEW_INITIAL;
     clearTable();
     el.resultSection.style.display = 'none';
     el.progressSection.style.display = 'none';
@@ -1177,6 +1473,11 @@
 
   function openSettings() {
     el.apiBaseInput.value = getApiBase();
+    // 动态更新提示文本，确保显示当前默认地址
+    const hint = document.getElementById('apiHint');
+    if (hint) {
+      hint.innerHTML = `默认公网后端：<br><code>${DEFAULT_API_BASE}</code><br>网页首次打开会自动使用该地址，无需手动设置。`;
+    }
     el.settingsModal.style.display = 'flex';
     checkConnection();
   }
