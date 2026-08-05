@@ -37,6 +37,53 @@
     }
   };
   const api = (path) => getApiBase() + path;
+  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+  function createRequestId(prefix = 'req') {
+    const randomPart = window.crypto?.randomUUID
+      ? window.crypto.randomUUID().replace(/-/g, '')
+      : Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return `${prefix}_${randomPart}`;
+  }
+
+  async function fetchWithRetry(path, options = {}, retryOptions = {}) {
+    const {
+      attempts = 3,
+      timeoutMs = 180000,
+      stage = '请求',
+      onRetry = null,
+    } = retryOptions;
+    const url = api(path);
+    let lastError = null;
+
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const response = await fetch(url, {...options, signal: controller.signal});
+        clearTimeout(timeoutId);
+        if (response.ok || (response.status < 500 && response.status !== 429)) {
+          return response;
+        }
+        lastError = new Error(`${stage}暂时不可用（HTTP ${response.status}）`);
+      } catch (error) {
+        clearTimeout(timeoutId);
+        lastError = error;
+      }
+
+      if (attempt < attempts) {
+        const delayMs = 1000 * (2 ** (attempt - 1));
+        console.warn(`${stage}失败，第 ${attempt}/${attempts} 次，${delayMs / 1000} 秒后重试`, lastError);
+        if (onRetry) onRetry(attempt, attempts, delayMs, lastError);
+        await sleep(delayMs);
+      }
+    }
+
+    if (lastError?.name === 'AbortError') {
+      throw new Error(`${stage}超时（${url}），已自动重试 ${attempts} 次`);
+    }
+    throw new Error(`${stage}连接失败（${url}），已自动重试 ${attempts} 次：${lastError?.message || 'Failed to fetch'}`);
+  }
 
   // 列表行中最多直接展示的商品数，超出则点"查看更多"
   const ROW_PREVIEW_LIMIT = 5;
@@ -686,9 +733,8 @@
 
         el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${Math.min(CHUNK_SIZE, totalUrls)}/${totalUrls} 张并启动搜索...</span>`;
 
-        const firstController = new AbortController();
-        const firstTimeoutId = setTimeout(() => firstController.abort(), 180000);
-        const firstRes = await fetch(api('/api/upload_urls'), {
+        const firstRequestId = createRequestId('first');
+        const firstRes = await fetchWithRetry('/api/upload_urls', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -696,10 +742,25 @@
             auto_search: true,
             expected_total: totalUrls,
             is_last_batch: isFirstOnly,
+            request_id: firstRequestId,
           }),
-          signal: firstController.signal,
+        }, {
+          attempts: 3,
+          timeoutMs: 180000,
+          stage: '首批图片上传与搜索启动',
+          onRetry: (attempt, attempts) => {
+            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>连接中断，正在自动重试 ${attempt + 1}/${attempts}...</span>`;
+            updateProgress({
+              status: 'searching',
+              message: `连接暂时中断，正在重试首批任务 ${attempt + 1}/${attempts}...`,
+              current: 0,
+              total: totalUrls,
+              downloaded_count: 0,
+              searched_count: 0,
+              is_streaming: true,
+            });
+          },
         });
-        clearTimeout(firstTimeoutId);
 
         const firstData = await firstRes.json();
         if (!firstRes.ok) throw new Error(firstData.error || 'URL上传失败');
@@ -744,9 +805,8 @@
             const isLast = chunkIdx === totalChunks - 1;
 
             try {
-              const controller = new AbortController();
-              const timeoutId = setTimeout(() => controller.abort(), 180000);
-              const res = await fetch(api('/api/upload_urls'), {
+              const chunkRequestId = createRequestId(`chunk${chunkIdx + 1}`);
+              const res = await fetchWithRetry('/api/upload_urls', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -754,10 +814,24 @@
                   task_id: taskId,
                   expected_total: totalUrls,
                   is_last_batch: isLast,
+                  request_id: chunkRequestId,
                 }),
-                signal: controller.signal,
+              }, {
+                attempts: 3,
+                timeoutMs: 180000,
+                stage: `第 ${chunkIdx + 1}/${totalChunks} 批图片上传`,
+                onRetry: (attempt, attempts) => {
+                  updateProgress({
+                    status: 'searching',
+                    message: `第 ${chunkIdx + 1}/${totalChunks} 批连接中断，正在重试 ${attempt + 1}/${attempts}...`,
+                    current: 0,
+                    total: totalUrls,
+                    downloaded_count: totalUploaded,
+                    searched_count: 0,
+                    is_streaming: true,
+                  });
+                },
               });
-              clearTimeout(timeoutId);
 
               const chunkData = await res.json();
               if (!res.ok) {
