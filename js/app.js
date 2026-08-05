@@ -51,6 +51,8 @@
     tableRows: 0,          // 表格当前行数
     taskId: null,
     pollingTimer: null,
+    elapsedTimer: null,
+    searchStartedAt: null,
     results: null,
     // 懒加载渲染计数
     fileVisibleCount: PREVIEW_INITIAL,
@@ -107,6 +109,11 @@
     progressPercent: document.getElementById('progressPercent'),
     currentImage: document.getElementById('currentImage'),
     foundProducts: document.getElementById('foundProducts'),
+    elapsedTime: document.getElementById('elapsedTime'),
+    estimatedTime: document.getElementById('estimatedTime'),
+    imageStatusSection: document.getElementById('imageStatusSection'),
+    imageStatusSummary: document.getElementById('imageStatusSummary'),
+    imageStatusList: document.getElementById('imageStatusList'),
 
     // 结果
     resultSection: document.getElementById('result-section'),
@@ -825,10 +832,111 @@
   function showProgress() {
     el.progressSection.style.display = 'block';
     el.resultSection.style.display = 'none';
+    // 重置计时器状态
+    state.searchStartedAt = null;
+    stopElapsedTimer();
+    el.elapsedTime.textContent = '00:00';
+    el.estimatedTime.textContent = '-';
+    el.imageStatusSection.style.display = 'none';
     document.getElementById('upload-section').scrollIntoView({
       behavior: 'smooth',
       block: 'start',
     });
+  }
+
+  // ====== 实时计时器 ======
+  function formatDuration(seconds) {
+    if (seconds < 0) seconds = 0;
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  }
+
+  function startElapsedTimer() {
+    stopElapsedTimer();
+    updateElapsedDisplay();
+    state.elapsedTimer = setInterval(updateElapsedDisplay, 1000);
+  }
+
+  function stopElapsedTimer() {
+    if (state.elapsedTimer) {
+      clearInterval(state.elapsedTimer);
+      state.elapsedTimer = null;
+    }
+  }
+
+  function updateElapsedDisplay() {
+    if (!state.searchStartedAt) {
+      el.elapsedTime.textContent = '00:00';
+      el.estimatedTime.textContent = '-';
+      return;
+    }
+    const startMs = new Date(state.searchStartedAt).getTime();
+    const elapsedSec = (Date.now() - startMs) / 1000;
+    el.elapsedTime.textContent = formatDuration(elapsedSec);
+
+    // 预估剩余时间
+    const searched = parseInt(el.progressCurrent.textContent) || 0;
+    const total = parseInt(el.progressTotal.textContent) || 0;
+    if (searched > 0 && total > 0 && searched < total) {
+      const avgPerImage = elapsedSec / searched;
+      const remaining = (total - searched) * avgPerImage;
+      el.estimatedTime.textContent = '约 ' + formatDuration(remaining);
+    } else if (searched >= total && total > 0) {
+      el.estimatedTime.textContent = '即将完成';
+    } else {
+      el.estimatedTime.textContent = '-';
+    }
+  }
+
+  // ====== 渲染每张图片处理状态 ======
+  function renderImageStatusList(imageStatuses) {
+    if (!imageStatuses || imageStatuses.length === 0) {
+      el.imageStatusSection.style.display = 'none';
+      return;
+    }
+    el.imageStatusSection.style.display = 'block';
+
+    const completedCount = imageStatuses.filter(s =>
+      s.status === 'completed' || s.status === 'no_results'
+    ).length;
+    el.imageStatusSummary.textContent = `${completedCount}/${imageStatuses.length} 已完成`;
+
+    // 确定当前正在搜索的图片（第一个pending的算作searching）
+    const firstPendingIdx = imageStatuses.findIndex(s => s.status === 'pending');
+
+    const statusConfig = {
+      'pending':      { icon: '·', badge: '等待中',   cls: 'pending' },
+      'searching':    { icon: '→', badge: '搜索中',   cls: 'searching' },
+      'completed':    { icon: '✓', badge: '已完成',   cls: 'completed' },
+      'no_results':   { icon: '!', badge: '无结果',   cls: 'no_results' },
+      'failed':       { icon: '✕', badge: '失败',     cls: 'failed' },
+    };
+
+    el.imageStatusList.innerHTML = imageStatuses.map((img, idx) => {
+      // 如果是第一个pending且有其他已完成，标记为searching
+      let displayStatus = img.status;
+      if (img.status === 'pending' && idx === firstPendingIdx && completedCount < imageStatuses.length) {
+        displayStatus = 'searching';
+      }
+      const cfg = statusConfig[displayStatus] || statusConfig['pending'];
+
+      const timeStr = img.search_time
+        ? `<span class="search-time">${new Date(img.search_time).toLocaleTimeString('zh-CN', {hour12: false})}</span>`
+        : '';
+      const countStr = img.result_count > 0
+        ? `<span class="result-count">${img.result_count} 个商品</span>`
+        : (displayStatus === 'completed' || displayStatus === 'no_results' ? '<span>0 个商品</span>' : '');
+
+      return `
+        <div class="image-status-item">
+          <span class="image-status-icon ${cfg.cls}">${cfg.icon}</span>
+          <span class="image-status-name" title="${img.name}">${img.name}</span>
+          <span class="image-status-info">${countStr}${timeStr}</span>
+          <span class="image-status-badge ${cfg.cls}">${cfg.badge}</span>
+        </div>
+      `;
+    }).join('');
   }
 
   function updateProgress(data) {
@@ -841,6 +949,12 @@
       'failed': '失败',
     };
     el.progressStatus.textContent = statusMap[data.status] || data.status;
+
+    // 记录搜索开始时间（用于实时计时）
+    if (data.search_started_at && !state.searchStartedAt) {
+      state.searchStartedAt = data.search_started_at;
+      startElapsedTimer();
+    }
 
     const isStreaming = data.is_streaming;
     const downloaded = data.downloaded_count !== undefined ? data.downloaded_count : (data.current || 0);
@@ -878,6 +992,11 @@
     if (data.results_count !== undefined) {
       el.foundProducts.textContent = data.results_count;
     }
+
+    // 渲染每张图片处理状态列表
+    if (data.image_statuses) {
+      renderImageStatusList(data.image_statuses);
+    }
   }
 
   function startPolling() {
@@ -910,6 +1029,7 @@
       clearInterval(state.pollingTimer);
       state.pollingTimer = null;
     }
+    stopElapsedTimer();
   }
 
   // ====== 加载结果 ======
