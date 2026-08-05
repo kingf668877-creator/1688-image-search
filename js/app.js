@@ -920,10 +920,43 @@
       state.results = data;
       renderResults(data);
       saveToHistory(data);
+
+      // 如果结果中还没有运费信息，12秒后自动刷新获取运费
+      const hasFreight = checkHasFreight(data);
+      if (!hasFreight && !state.freightRefreshTimer) {
+        console.log('[运费] 结果中无运费，12秒后自动刷新...');
+        state.freightRefreshTimer = setTimeout(async () => {
+          state.freightRefreshTimer = null;
+          try {
+            console.log('[运费] 刷新结果获取运费...');
+            const res2 = await fetch(api(`/api/results/${state.taskId}`));
+            const data2 = await res2.json();
+            if (res2.ok) {
+              state.results = data2;
+              renderResults(data2);
+              console.log('[运费] 结果已刷新');
+            }
+          } catch (e) {
+            console.error('[运费] 刷新失败:', e);
+          }
+        }, 12000);
+      }
     } catch (error) {
       console.error('加载结果失败:', error);
       alert('加载结果失败: ' + error.message);
     }
+  }
+
+  // 检查结果中是否已有运费信息
+  function checkHasFreight(data) {
+    if (!data || !data.results) return false;
+    for (const key of Object.keys(data.results)) {
+      const products = data.results[key].results || [];
+      for (const p of products) {
+        if (p.price_description) return true;
+      }
+    }
+    return false;
   }
 
   // ====== 渲染结果（列表方式：一行一图） ======
