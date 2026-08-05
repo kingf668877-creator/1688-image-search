@@ -920,63 +920,46 @@
       state.results = data;
       renderResults(data);
       saveToHistory(data);
-
-      // 如果结果中还没有运费信息，启动轮询刷新获取运费
-      const hasFreight = checkHasFreight(data);
-      if (!hasFreight && !state.freightRefreshTimer) {
-        console.log('[运费] 结果中无运费，启动轮询刷新...');
-        let freightAttempts = 0;
-        const freightMaxAttempts = 8; // 最多刷新8次
-        const freightPoll = async () => {
-          freightAttempts++;
-          try {
-            console.log(`[运费] 第${freightAttempts}次刷新...`);
-            const res2 = await fetch(api(`/api/results/${state.taskId}`));
-            const data2 = await res2.json();
-            if (res2.ok) {
-              const nowHasFreight = checkHasFreight(data2);
-              state.results = data2;
-              renderResults(data2);
-              if (nowHasFreight) {
-                console.log(`[运费] 第${freightAttempts}次刷新成功，运费已到位`);
-                state.freightRefreshTimer = null;
-                return;
-              }
-              if (freightAttempts < freightMaxAttempts) {
-                state.freightRefreshTimer = setTimeout(freightPoll, 5000);
-              } else {
-                console.log('[运费] 达到最大刷新次数，停止');
-                state.freightRefreshTimer = null;
-              }
-            }
-          } catch (e) {
-            console.error('[运费] 刷新失败:', e);
-            if (freightAttempts < freightMaxAttempts) {
-              state.freightRefreshTimer = setTimeout(freightPoll, 5000);
-            } else {
-              state.freightRefreshTimer = null;
-            }
-          }
-        };
-        // 首次5秒后刷新
-        state.freightRefreshTimer = setTimeout(freightPoll, 5000);
-      }
     } catch (error) {
       console.error('加载结果失败:', error);
       alert('加载结果失败: ' + error.message);
     }
   }
 
-  // 检查结果中是否已有运费信息
-  function checkHasFreight(data) {
-    if (!data || !data.results) return false;
-    for (const key of Object.keys(data.results)) {
-      const products = data.results[key].results || [];
-      for (const p of products) {
-        if (p.price_description) return true;
+  // ====== 单个商品运费查询 ======
+  async function queryFreight(offerId, btnEl) {
+    if (!offerId) return;
+    // 防止重复点击
+    if (btnEl.dataset.loading === '1') return;
+    btnEl.dataset.loading = '1';
+    const originalText = btnEl.textContent;
+    btnEl.textContent = '查询中...';
+    btnEl.classList.add('freight-loading');
+
+    try {
+      const res = await fetch(api(`/api/freight/${offerId}`));
+      const data = await res.json();
+      if (res.ok && data.success) {
+        const freight = data.freight || '面议';
+        btnEl.textContent = `运费: ${freight}`;
+        btnEl.classList.remove('freight-loading');
+        btnEl.classList.add('freight-done');
+        btnEl.dataset.loading = '0';
+        btnEl.disabled = true;
+      } else {
+        throw new Error(data.error || '获取运费失败');
       }
+    } catch (e) {
+      console.error('[运费查询] 失败:', e);
+      btnEl.textContent = '运费查询失败';
+      btnEl.classList.remove('freight-loading');
+      btnEl.classList.add('freight-error');
+      btnEl.dataset.loading = '0';
+      setTimeout(() => {
+        btnEl.textContent = originalText;
+        btnEl.classList.remove('freight-error');
+      }, 3000);
     }
-    return false;
   }
 
   // ====== 渲染结果（列表方式：一行一图） ======
@@ -1245,9 +1228,12 @@
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
     }
-    if (deliveryParts.length > 0) {
-      deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
+    // 查运费按钮
+    const offerId = item.offer_id || extractOfferId(item.url);
+    if (offerId) {
+      deliveryParts.push(`<button class="mini-freight-btn" data-offer-id="${offerId}">查运费</button>`);
     }
+    deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
 
     // 店铺 + 城市 + 开店年限
     let shopHtml = '';
@@ -1298,10 +1284,17 @@
         window.open(item.url, '_blank');
       });
     }
+
+    // 查运费按钮事件
+    const miniFreightBtn = card.querySelector('.mini-freight-btn');
+    if (miniFreightBtn) {
+      miniFreightBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        queryFreight(miniFreightBtn.dataset.offerId, miniFreightBtn);
+      });
+    }
     return card;
   }
-
-  // ====== 查看更多弹窗 ======
   function setupResultModal() {
     el.resultModalOverlay.addEventListener('click', closeResultModal);
     el.resultModalClose.addEventListener('click', closeResultModal);
@@ -1385,9 +1378,12 @@
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
     }
-    if (deliveryParts.length > 0) {
-      deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
+    // 查运费按钮
+    const fullOfferId = item.offer_id || extractOfferId(item.url);
+    if (fullOfferId) {
+      deliveryParts.push(`<button class="freight-btn" data-offer-id="${fullOfferId}">查运费</button>`);
     }
+    deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
 
     // 店铺信息：店名 + 城市 + 开店年限
     let shopHtml = '';
@@ -1439,6 +1435,15 @@
       imgEl.addEventListener('click', (e) => {
         e.stopPropagation();
         window.open(item.url, '_blank');
+      });
+    }
+
+    // 查运费按钮事件
+    const fullFreightBtn = card.querySelector('.freight-btn');
+    if (fullFreightBtn) {
+      fullFreightBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        queryFreight(fullFreightBtn.dataset.offerId, fullFreightBtn);
       });
     }
     return card;
@@ -1635,6 +1640,13 @@
     const num = parseFloat(String(price).replace(/[^\d.]/g, ''));
     if (isNaN(num)) return String(price);
     return '¥' + num.toFixed(2);
+  }
+
+  // 从URL中提取offerId
+  function extractOfferId(url) {
+    if (!url) return null;
+    const m = String(url).match(/offer\/(\d+)/);
+    return m ? m[1] : null;
   }
 
   // ====== 启动 ======
