@@ -921,25 +921,45 @@
       renderResults(data);
       saveToHistory(data);
 
-      // 如果结果中还没有运费信息，12秒后自动刷新获取运费
+      // 如果结果中还没有运费信息，启动轮询刷新获取运费
       const hasFreight = checkHasFreight(data);
       if (!hasFreight && !state.freightRefreshTimer) {
-        console.log('[运费] 结果中无运费，12秒后自动刷新...');
-        state.freightRefreshTimer = setTimeout(async () => {
-          state.freightRefreshTimer = null;
+        console.log('[运费] 结果中无运费，启动轮询刷新...');
+        let freightAttempts = 0;
+        const freightMaxAttempts = 8; // 最多刷新8次
+        const freightPoll = async () => {
+          freightAttempts++;
           try {
-            console.log('[运费] 刷新结果获取运费...');
+            console.log(`[运费] 第${freightAttempts}次刷新...`);
             const res2 = await fetch(api(`/api/results/${state.taskId}`));
             const data2 = await res2.json();
             if (res2.ok) {
+              const nowHasFreight = checkHasFreight(data2);
               state.results = data2;
               renderResults(data2);
-              console.log('[运费] 结果已刷新');
+              if (nowHasFreight) {
+                console.log(`[运费] 第${freightAttempts}次刷新成功，运费已到位`);
+                state.freightRefreshTimer = null;
+                return;
+              }
+              if (freightAttempts < freightMaxAttempts) {
+                state.freightRefreshTimer = setTimeout(freightPoll, 5000);
+              } else {
+                console.log('[运费] 达到最大刷新次数，停止');
+                state.freightRefreshTimer = null;
+              }
             }
           } catch (e) {
             console.error('[运费] 刷新失败:', e);
+            if (freightAttempts < freightMaxAttempts) {
+              state.freightRefreshTimer = setTimeout(freightPoll, 5000);
+            } else {
+              state.freightRefreshTimer = null;
+            }
           }
-        }, 12000);
+        };
+        // 首次5秒后刷新
+        state.freightRefreshTimer = setTimeout(freightPoll, 5000);
       }
     } catch (error) {
       console.error('加载结果失败:', error);
