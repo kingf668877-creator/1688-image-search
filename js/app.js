@@ -7,7 +7,7 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://generator-context-terrorism-junior.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://anyone-wages-plots-losses.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
     'https://dianleida.pythonanywhere.com',
     'https://192.168.1.35:5443',
@@ -17,6 +17,7 @@
     'https://cdt-registry-proudly-individuals.trycloudflare.com',
     'https://farm-leads-discusses-generating.trycloudflare.com',
     'https://quilt-discounts-golf-upgrades.trycloudflare.com',
+    'https://generator-context-terrorism-junior.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
