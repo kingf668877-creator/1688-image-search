@@ -1373,9 +1373,7 @@
     // 运费 + 揽收时效
     let deliveryHtml = '';
     const deliveryParts = [];
-    if (item.price_description) {
-      deliveryParts.push(`<span class="mini-delivery-item" title="运费">🚚${item.price_description}</span>`);
-    }
+    // 不展示图搜返回的运费信息(price_description)，只保留查运费按钮
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
     }
@@ -1523,9 +1521,7 @@
     // 运费 + 揽收时效
     let deliveryHtml = '';
     const deliveryParts = [];
-    if (item.price_description) {
-      deliveryParts.push(`<span class="delivery-item" title="运费">🚚 ${item.price_description}</span>`);
-    }
+    // 不展示图搜返回的运费信息(price_description)，只保留查运费按钮
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
     }
