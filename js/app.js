@@ -940,12 +940,20 @@
       const res = await fetch(api(`/api/freight/${offerId}`));
       const data = await res.json();
       if (res.ok && data.success) {
-        const freight = data.freight || '面议';
-        btnEl.textContent = `运费: ${freight}`;
-        btnEl.classList.remove('freight-loading');
-        btnEl.classList.add('freight-done');
-        btnEl.dataset.loading = '0';
-        btnEl.disabled = true;
+        const freight = data.freight;
+        if (freight) {
+          btnEl.textContent = `运费: ${freight}`;
+          btnEl.classList.remove('freight-loading');
+          btnEl.classList.add('freight-done');
+          btnEl.dataset.loading = '0';
+          btnEl.disabled = true;
+        } else {
+          btnEl.textContent = '暂无运费信息';
+          btnEl.classList.remove('freight-loading');
+          btnEl.classList.add('freight-error');
+          btnEl.dataset.loading = '0';
+          btnEl.disabled = true;
+        }
       } else {
         throw new Error(data.error || '获取运费失败');
       }
