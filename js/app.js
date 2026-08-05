@@ -1163,44 +1163,7 @@
     btnEl.textContent = text;
   }
 
-  async function queryFreightSingle(btnEl) {
-    const offerId = btnEl?.dataset?.offerId;
-    if (!offerId || btnEl.dataset.loading === '1' || btnEl.disabled) return;
-    const originalText = btnEl.textContent;
-    setFreightButtonState(btnEl, 'loading', '查询中...');
-
-    try {
-      const res = await fetchWithRetry(`/api/freight/${offerId}`, {}, {
-        attempts: 2,
-        timeoutMs: 120000,
-        stage: `商品 ${offerId} 运费查询`,
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || '获取运费失败');
-      }
-      const freight = normalizeFreightText(data.freight);
-      if (freight) {
-        setFreightButtonState(btnEl, 'done', `运费: ${freight}`);
-        btnEl.disabled = true;
-      } else {
-        setFreightButtonState(btnEl, 'error', '暂无运费信息');
-        btnEl.disabled = true;
-      }
-    } catch (e) {
-      console.error('[运费查询] 失败:', e);
-      setFreightButtonState(btnEl, 'error', '运费查询失败');
-      setTimeout(() => {
-        if (!btnEl.disabled) {
-          btnEl.textContent = originalText;
-          btnEl.classList.remove('freight-error');
-          btnEl.dataset.loading = '0';
-        }
-      }, 3000);
-    }
-  }
-
-  function queryFreightBatch(clickedBtn) {
+  async function queryFreightBatch(clickedBtn) {
     if (!clickedBtn || clickedBtn.dataset.loading === '1' || clickedBtn.disabled) return;
     const root = clickedBtn.closest('.result-row, .result-modal, body') || document;
     const buttons = Array.from(root.querySelectorAll('.mini-freight-btn, .freight-btn'))
@@ -1209,7 +1172,63 @@
     const orderedButtons = clickedIndex >= 0
       ? buttons.slice(clickedIndex).concat(buttons.slice(0, clickedIndex))
       : [clickedBtn].concat(buttons.filter(btn => btn !== clickedBtn));
-    orderedButtons.slice(0, FREIGHT_BATCH_SIZE).forEach(btn => queryFreightSingle(btn));
+
+    const selectedButtons = [];
+    const seenOfferIds = new Set();
+    for (const btn of orderedButtons) {
+      const offerId = btn.dataset.offerId;
+      if (!seenOfferIds.has(offerId)) {
+        seenOfferIds.add(offerId);
+        selectedButtons.push(btn);
+      }
+      if (selectedButtons.length >= FREIGHT_BATCH_SIZE) break;
+    }
+    if (selectedButtons.length === 0) return;
+
+    const originalTexts = new Map();
+    selectedButtons.forEach(btn => {
+      originalTexts.set(btn, btn.textContent);
+      setFreightButtonState(btn, 'loading', '查询中...');
+    });
+
+    try {
+      const offerIds = selectedButtons.map(btn => btn.dataset.offerId);
+      const res = await fetchWithRetry('/api/freight_batch', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({offer_ids: offerIds}),
+      }, {
+        attempts: 2,
+        timeoutMs: 120000,
+        stage: `${offerIds.length} 个商品运费批量查询`,
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || '批量获取运费失败');
+      }
+
+      selectedButtons.forEach(btn => {
+        const freight = normalizeFreightText(data.results?.[btn.dataset.offerId]);
+        if (freight) {
+          setFreightButtonState(btn, 'done', `运费: ${freight}`);
+        } else {
+          setFreightButtonState(btn, 'error', '暂无运费信息');
+        }
+        btn.disabled = true;
+      });
+    } catch (e) {
+      console.error('[运费批量查询] 失败:', e);
+      selectedButtons.forEach(btn => {
+        setFreightButtonState(btn, 'error', '运费查询失败');
+        setTimeout(() => {
+          if (!btn.disabled) {
+            btn.textContent = originalTexts.get(btn) || '查运费';
+            btn.classList.remove('freight-error');
+            btn.dataset.loading = '0';
+          }
+        }, 3000);
+      });
+    }
   }
 
   // ====== 渲染结果（列表方式：一行一图） ======
@@ -1538,7 +1557,7 @@
     if (miniFreightBtn) {
       miniFreightBtn.addEventListener('click', (e) => {
         e.stopPropagation();
-        queryFreight(miniFreightBtn.dataset.offerId, miniFreightBtn);
+        queryFreightBatch(miniFreightBtn);
       });
     }
     return card;
