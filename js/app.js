@@ -667,6 +667,18 @@
         let allFailedFiles = [];
         let streamingStarted = false;
 
+        // 立即显示进度条（用户点击开始就看到）
+        showProgress();
+        updateProgress({
+          status: 'searching',
+          message: `正在下载 ${totalUrls} 张图片...`,
+          current: 0,
+          total: totalUrls,
+          downloaded_count: 0,
+          searched_count: 0,
+          is_streaming: true,
+        });
+
         // 上传第一批并启动流式搜索
         const firstChunkUrls = urls.slice(0, CHUNK_SIZE);
         const isFirstOnly = totalChunks === 1;
@@ -773,6 +785,16 @@
       } else {
         // 批量 / 表格方式：调用 /api/upload
         const files = state.currentTab === 'batch' ? state.files : getTableFiles();
+
+        // 立即显示进度条
+        showProgress();
+        updateProgress({
+          status: 'pending',
+          message: `正在上传 ${files.length} 张图片...`,
+          current: 0,
+          total: files.length,
+        });
+
         el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在上传 ${files.length} 张图片...</span>`;
         const formData = new FormData();
         files.forEach(file => formData.append('files', file));
