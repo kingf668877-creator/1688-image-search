@@ -7,8 +7,9 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://homework-jvc-terms-funky.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://corporate-thousand-cool-fixes.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
+    'https://homework-jvc-terms-funky.trycloudflare.com',
     'https://dianleida.pythonanywhere.com',
     'https://192.168.1.35:5443',
     'https://e216772.r5.cpolar.top',
