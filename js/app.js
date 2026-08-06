@@ -171,7 +171,6 @@
     resultList: document.getElementById('resultList'),
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     newSearchBtn: document.getElementById('newSearchBtn'),
-    historyList: document.getElementById('historyList'),
 
     // 查看更多弹窗
     resultModal: document.getElementById('resultModal'),
@@ -219,7 +218,6 @@
     setupSettings();
     setupResultModal();
     setupPagination();
-    loadHistory();
     // 初始添加 3 行表格
     addTableRow();
     addTableRow();
@@ -1138,7 +1136,6 @@
       if (!res.ok) throw new Error(data.error || '获取结果失败');
       state.results = data;
       renderResults(data);
-      saveToHistory(data);
     } catch (error) {
       console.error('加载结果失败:', error);
       alert('加载结果失败: ' + error.message);
@@ -1209,13 +1206,20 @@
       }
 
       selectedButtons.forEach(btn => {
-        const freight = normalizeFreightText(data.results?.[btn.dataset.offerId]);
+        const offerId = btn.dataset.offerId;
+        const freight = normalizeFreightText(data.results?.[offerId]);
+        const itemStatus = data.statuses?.[offerId]?.status || '';
         if (freight) {
-          setFreightButtonState(btn, 'done', `运费: ${freight}`);
+          const cached = itemStatus === 'cache' || itemStatus === 'stale_cache';
+          setFreightButtonState(btn, 'done', `运费: ${freight}${cached ? '（缓存）' : ''}`);
+          btn.disabled = true;
+        } else if (itemStatus === 'blocked' || itemStatus === 'circuit_open') {
+          setFreightButtonState(btn, 'error', '访问受限，请稍后重试');
+          btn.disabled = false;
         } else {
           setFreightButtonState(btn, 'error', '暂无运费信息');
+          btn.disabled = true;
         }
-        btn.disabled = true;
       });
     } catch (e) {
       console.error('[运费批量查询] 失败:', e);
@@ -1747,60 +1751,6 @@
     el.searchBtn.disabled = false;
     el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
     window.scrollTo({ top: 0, behavior: 'smooth' });
-  }
-
-  // ====== 历史记录 ======
-  function saveToHistory(data) {
-    try {
-      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
-      const record = {
-        task_id: data.task_id,
-        status: data.status,
-        total_images: data.total_images,
-        total_products: data.total_products,
-        completed_at: data.completed_at,
-        timestamp: Date.now(),
-      };
-      const filtered = history.filter(h => h.task_id !== record.task_id);
-      filtered.unshift(record);
-      localStorage.setItem('searchHistory', JSON.stringify(filtered.slice(0, 20)));
-      loadHistory();
-    } catch (e) {
-      console.error('保存历史失败:', e);
-    }
-  }
-
-  function loadHistory() {
-    try {
-      const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
-      if (history.length === 0) {
-        el.historyList.innerHTML = `
-          <div class="empty-state">
-            <div class="empty-icon">📋</div>
-            <p>暂无历史记录</p>
-          </div>
-        `;
-        return;
-      }
-      el.historyList.innerHTML = '';
-      history.forEach(record => {
-        const item = document.createElement('div');
-        item.className = 'history-item';
-        const statusClass = record.status === 'completed' ? 'completed' : 'failed';
-        const statusText = record.status === 'completed' ? '已完成' : '失败';
-        item.innerHTML = `
-          <div class="history-item-icon">🔍</div>
-          <div class="history-item-info">
-            <div class="history-item-title">${record.total_images} 张图片 · ${record.total_products} 个商品</div>
-            <div class="history-item-time">${formatTime(record.completed_at)}</div>
-          </div>
-          <div class="history-item-status ${statusClass}">${statusText}</div>
-        `;
-        el.historyList.appendChild(item);
-      });
-    } catch (e) {
-      console.error('加载历史失败:', e);
-    }
   }
 
   // ====== 设置面板 ======
