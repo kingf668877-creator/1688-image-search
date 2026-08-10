@@ -7,6 +7,8 @@
   // ====== API 配置 ======
   const DEFAULT_API_BASE = 'https://parallel-west-msie-approved.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
+    'https://substantially-removed-think-dublin.trycloudflare.com',
+    'https://corporate-thousand-cool-fixes.trycloudflare.com',
     'https://homework-jvc-terms-funky.trycloudflare.com',
     'https://dianleida.pythonanywhere.com',
     'https://192.168.1.35:5443',
@@ -19,11 +21,12 @@
     'https://generator-context-terrorism-junior.trycloudflare.com',
     'https://anyone-wages-plots-losses.trycloudflare.com',
     'https://kiss-impressed-prevention-buffalo.trycloudflare.com',
+    'https://checklist-paperbacks-parking-authorized.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
     if (!saved || LEGACY_API_BASES.has(saved)) {
-      if (saved) localStorage.setItem('apiBase', DEFAULT_API_BASE);
+      localStorage.setItem('apiBase', DEFAULT_API_BASE);
       return DEFAULT_API_BASE;
     }
     return saved;
@@ -78,12 +81,9 @@
     }
     throw new Error(`${stage}连接失败（${url}），已自动重试 ${attempts} 次：${lastError?.message || 'Failed to fetch'}`);
   }
-  // 列表行中最多直接展示的商品数，超出则点"查看更多"
   const ROW_PREVIEW_LIMIT = 5;
-  // 预览网格懒加载：初始渲染数量和每次增量
   const PREVIEW_INITIAL = 30;
   const PREVIEW_INCREMENT = 30;
-  // ====== 全局状态 ======
   const state = {
     currentTab: 'batch',
     files: [],
@@ -101,7 +101,6 @@
     urlVisibleCount: PREVIEW_INITIAL,
     pagination: { currentPage: 1, pageSize: 20, totalItems: 0, imageNames: [] },
   };
-  // ====== DOM 元素 ======
   const el = {
     uploadTabs: document.getElementById('uploadTabs'),
     panelBatch: document.getElementById('panel-batch'),
@@ -173,7 +172,6 @@
     pageJumpBtn: document.getElementById('pageJumpBtn'),
     pageSizeSelect: document.getElementById('pageSizeSelect'),
   };
-  // ====== 初始化 ======
   function init() {
     setupTabs();
     setupDragAndDrop();
@@ -190,7 +188,6 @@
     addTableRow();
     updateButtons();
   }
-  // ====== Page lifecycle cleanup ======
   function cleanupCurrentTask() {
     const taskId = state.taskId;
     if (!taskId || state.cleanupSentTaskId === taskId) return;
@@ -216,7 +213,6 @@
       cleanupCurrentTask();
     });
   }
-  // ====== Tab 切换 ======
   function setupTabs() {
     if (!el.uploadTabs) return;
     el.uploadTabs.addEventListener('click', (e) => {
@@ -236,7 +232,6 @@
     el.panelTable.classList.toggle('active', tabName === 'table');
     updateButtons();
   }
-  // ====== 拖拽上传 ======
   function setupDragAndDrop() {
     const dropZone = el.dropZone;
     if (!dropZone) return;
@@ -316,7 +311,6 @@
       el.fileGrid.appendChild(loadMore);
     }
   }
-  // ====== 链接上传 ======
   function setupUrlUpload() {
     el.clearUrlBtn.addEventListener('click', () => {
       el.urlTextarea.value = '';
@@ -410,7 +404,6 @@
     item.appendChild(img); item.appendChild(name); item.appendChild(removeBtn);
     return item;
   }
-  // ====== 表格上传 ======
   function setupTableUpload() {
     el.addTableRowBtn.addEventListener('click', addTableRow);
     el.clearTableBtn.addEventListener('click', clearTable);
@@ -489,7 +482,6 @@
     el.exportJsonBtn.addEventListener('click', exportJson);
     el.newSearchBtn.addEventListener('click', newSearch);
   }
-  // ====== 开始搜索 ======
   async function startSearch() {
     if (getCurrentFileCount() === 0) { alert('请先添加图片'); return; }
     el.searchBtn.disabled = true;
