@@ -2,15 +2,15 @@
    1688 图搜批量寻源 - 前端交互逻辑
    支持三种上传方式 + 列表式结果展示
    ============================================ */
+
 (function () {
   'use strict';
+
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://parallel-west-msie-approved.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://age-tear-procedures-exchanges.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
-    'https://substantially-removed-think-dublin.trycloudflare.com',
     'https://corporate-thousand-cool-fixes.trycloudflare.com',
     'https://homework-jvc-terms-funky.trycloudflare.com',
-    'https://dianleida.pythonanywhere.com',
     'https://192.168.1.35:5443',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
@@ -21,12 +21,11 @@
     'https://generator-context-terrorism-junior.trycloudflare.com',
     'https://anyone-wages-plots-losses.trycloudflare.com',
     'https://kiss-impressed-prevention-buffalo.trycloudflare.com',
-    'https://checklist-paperbacks-parking-authorized.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
     if (!saved || LEGACY_API_BASES.has(saved)) {
-      localStorage.setItem('apiBase', DEFAULT_API_BASE);
+      if (saved) localStorage.setItem('apiBase', DEFAULT_API_BASE);
       return DEFAULT_API_BASE;
     }
     return saved;
@@ -40,12 +39,14 @@
   };
   const api = (path) => getApiBase() + path;
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
   function createRequestId(prefix = 'req') {
     const randomPart = window.crypto?.randomUUID
       ? window.crypto.randomUUID().replace(/-/g, '')
       : Math.random().toString(36).slice(2) + Date.now().toString(36);
     return `${prefix}_${randomPart}`;
   }
+
   async function fetchWithRetry(path, options = {}, retryOptions = {}) {
     const {
       attempts = 3,
@@ -55,6 +56,7 @@
     } = retryOptions;
     const url = api(path);
     let lastError = null;
+
     for (let attempt = 1; attempt <= attempts; attempt++) {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -69,6 +71,7 @@
         clearTimeout(timeoutId);
         lastError = error;
       }
+
       if (attempt < attempts) {
         const delayMs = 1000 * (2 ** (attempt - 1));
         console.warn(`${stage}失败，第 ${attempt}/${attempts} 次，${delayMs / 1000} 秒后重试`, lastError);
@@ -76,41 +79,61 @@
         await sleep(delayMs);
       }
     }
+
     if (lastError?.name === 'AbortError') {
       throw new Error(`${stage}超时（${url}），已自动重试 ${attempts} 次`);
     }
     throw new Error(`${stage}连接失败（${url}），已自动重试 ${attempts} 次：${lastError?.message || 'Failed to fetch'}`);
   }
+
+  // 列表行中最多直接展示的商品数，超出则点"查看更多"
   const ROW_PREVIEW_LIMIT = 5;
+  // 预览网格懒加载：初始渲染数量和每次增量
   const PREVIEW_INITIAL = 30;
   const PREVIEW_INCREMENT = 30;
+
+  // ====== 全局状态 ======
   const state = {
-    currentTab: 'batch',
-    files: [],
-    tableFiles: [],
-    tableRows: 0,
+    currentTab: 'batch',   // batch | link | table
+    files: [],             // 批量上传：已选择的文件列表
+    tableFiles: [],        // 表格上传：每行的文件（按行号索引）
+    tableRows: 0,          // 表格当前行数
     taskId: null,
     cleanupSentTaskId: null,
     pollingTimer: null,
     elapsedTimer: null,
     searchStartedAt: null,
     results: null,
-    showAllResults: false,
-    pollInterval: 2000,
+    showAllResults: false,  // 是否显示全部结果（虚拟滚动）
+    pollInterval: 2000,     // 动态轮询间隔
+    // 懒加载渲染计数
     fileVisibleCount: PREVIEW_INITIAL,
     urlVisibleCount: PREVIEW_INITIAL,
-    pagination: { currentPage: 1, pageSize: 20, totalItems: 0, imageNames: [] },
+    // 分页状态
+    pagination: {
+      currentPage: 1,
+      pageSize: 20,
+      totalItems: 0,
+      imageNames: [],
+    },
   };
+
+  // ====== DOM 元素 ======
   const el = {
+    // Tab
     uploadTabs: document.getElementById('uploadTabs'),
     panelBatch: document.getElementById('panel-batch'),
     panelLink: document.getElementById('panel-link'),
     panelTable: document.getElementById('panel-table'),
+
+    // 批量上传
     dropZone: document.getElementById('dropZone'),
     fileInput: document.getElementById('fileInput'),
     fileList: document.getElementById('fileList'),
     fileGrid: document.getElementById('fileGrid'),
     fileCount: document.getElementById('fileCount'),
+
+    // 链接上传
     urlTextarea: document.getElementById('urlTextarea'),
     urlFileInput: document.getElementById('urlFileInput'),
     clearUrlBtn: document.getElementById('clearUrlBtn'),
@@ -118,12 +141,18 @@
     urlPreview: document.getElementById('urlPreview'),
     urlCount: document.getElementById('urlCount'),
     urlGrid: document.getElementById('urlGrid'),
+
+    // 表格上传
     tableGrid: document.getElementById('tableGrid'),
     addTableRowBtn: document.getElementById('addTableRowBtn'),
     clearTableBtn: document.getElementById('clearTableBtn'),
     tableCount: document.getElementById('tableCount'),
+
+    // 公共按钮
     clearBtn: document.getElementById('clearBtn'),
     searchBtn: document.getElementById('searchBtn'),
+
+    // 进度
     progressSection: document.getElementById('progress-section'),
     progressStatus: document.getElementById('progressStatus'),
     progressFill: document.getElementById('progressFill'),
@@ -137,12 +166,16 @@
     imageStatusSection: document.getElementById('imageStatusSection'),
     imageStatusSummary: document.getElementById('imageStatusSummary'),
     imageStatusList: document.getElementById('imageStatusList'),
+
+    // 结果
     resultSection: document.getElementById('result-section'),
     resultSubtitle: document.getElementById('resultSubtitle'),
     statsRow: document.getElementById('statsRow'),
     resultList: document.getElementById('resultList'),
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     newSearchBtn: document.getElementById('newSearchBtn'),
+
+    // 查看更多弹窗
     resultModal: document.getElementById('resultModal'),
     resultModalOverlay: document.getElementById('resultModalOverlay'),
     resultModalClose: document.getElementById('resultModalClose'),
@@ -150,6 +183,8 @@
     resultModalTitle: document.getElementById('resultModalTitle'),
     resultModalSub: document.getElementById('resultModalSub'),
     resultModalGrid: document.getElementById('resultModalGrid'),
+
+    // 设置
     settingsBtn: document.getElementById('settingsBtn'),
     settingsModal: document.getElementById('settingsModal'),
     settingsOverlay: document.getElementById('settingsOverlay'),
@@ -158,6 +193,8 @@
     settingsSave: document.getElementById('settingsSave'),
     apiBaseInput: document.getElementById('apiBaseInput'),
     connectionStatus: document.getElementById('connectionStatus'),
+
+    // 上传耗时 & 分页
     uploadTiming: document.getElementById('uploadTiming'),
     uploadTimingValue: document.getElementById('uploadTimingValue'),
     paginationWrap: document.getElementById('paginationWrap'),
@@ -172,6 +209,8 @@
     pageJumpBtn: document.getElementById('pageJumpBtn'),
     pageSizeSelect: document.getElementById('pageSizeSelect'),
   };
+
+  // ====== 初始化 ======
   function init() {
     setupTabs();
     setupDragAndDrop();
@@ -188,6 +227,8 @@
     addTableRow();
     updateButtons();
   }
+
+  // ====== Page lifecycle cleanup ======
   function cleanupCurrentTask() {
     const taskId = state.taskId;
     if (!taskId || state.cleanupSentTaskId === taskId) return;
@@ -207,12 +248,14 @@
       keepalive: true,
     }).catch(error => console.warn('Task cleanup request failed:', error));
   }
+
   function setupLifecycleCleanup() {
     window.addEventListener('pagehide', (event) => {
       if (event.persisted === true) return;
       cleanupCurrentTask();
     });
   }
+  // ====== Tab 切换 ======
   function setupTabs() {
     if (!el.uploadTabs) return;
     el.uploadTabs.addEventListener('click', (e) => {
@@ -222,6 +265,7 @@
       switchTab(tabName);
     });
   }
+
   function switchTab(tabName) {
     state.currentTab = tabName;
     el.uploadTabs.querySelectorAll('.upload-tab').forEach(btn => {
@@ -232,19 +276,34 @@
     el.panelTable.classList.toggle('active', tabName === 'table');
     updateButtons();
   }
+
+  // ====== 拖拽上传（批量方式） ======
   function setupDragAndDrop() {
     const dropZone = el.dropZone;
     if (!dropZone) return;
+
     dropZone.addEventListener('click', () => { el.fileInput.click(); });
-    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('dragover'); });
-    dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); });
+
+    dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropZone.classList.add('dragover');
+    });
+
+    dropZone.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dropZone.classList.remove('dragover');
+    });
+
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault();
       dropZone.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files).filter(f => f.type.startsWith('image/'));
+      const files = Array.from(e.dataTransfer.files).filter(f =>
+        f.type.startsWith('image/')
+      );
       if (files.length > 0) addFiles(files);
     });
   }
+
   function setupFileInput() {
     el.fileInput.addEventListener('change', (e) => {
       const files = Array.from(e.target.files);
@@ -252,6 +311,7 @@
       el.fileInput.value = '';
     });
   }
+
   function addFiles(newFiles) {
     for (const file of newFiles) {
       const exists = state.files.some(f => f.name === file.name && f.size === file.size);
@@ -261,45 +321,58 @@
     renderFileList();
     updateButtons();
   }
+
   function removeFile(index) {
     state.files.splice(index, 1);
     renderFileList();
     updateButtons();
   }
+
   function clearFiles() {
     state.files = [];
     state.fileVisibleCount = PREVIEW_INITIAL;
     renderFileList();
     updateButtons();
   }
+
   function renderFileList() {
     if (state.files.length === 0) { el.fileList.style.display = 'none'; return; }
     el.fileList.style.display = 'block';
     el.fileCount.textContent = `${state.files.length} 张`;
     el.fileGrid.innerHTML = '';
+
+    // 懒加载：只渲染前 fileVisibleCount 个
     const visible = state.files.slice(0, state.fileVisibleCount);
     visible.forEach((file, index) => {
       const item = document.createElement('div');
       item.className = 'file-item';
+
       const img = document.createElement('img');
       img.alt = file.name;
       img.loading = 'lazy';
       const reader = new FileReader();
       reader.onload = (e) => { img.src = e.target.result; };
       reader.readAsDataURL(file);
+
       const name = document.createElement('div');
       name.className = 'file-item-name';
       name.textContent = file.name;
+
       const removeBtn = document.createElement('div');
       removeBtn.className = 'file-item-remove';
       removeBtn.innerHTML = '×';
       removeBtn.title = '移除';
-      removeBtn.addEventListener('click', (e) => { e.stopPropagation(); removeFile(index); });
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        removeFile(index);
+      });
+
       item.appendChild(img);
       item.appendChild(name);
       item.appendChild(removeBtn);
       el.fileGrid.appendChild(item);
     });
+
     if (state.fileVisibleCount < state.files.length) {
       const loadMore = document.createElement('div');
       loadMore.className = 'load-more-btn';
@@ -311,6 +384,8 @@
       el.fileGrid.appendChild(loadMore);
     }
   }
+
+  // ====== 链接上传 ======
   function setupUrlUpload() {
     el.clearUrlBtn.addEventListener('click', () => {
       el.urlTextarea.value = '';
@@ -337,11 +412,13 @@
       updateButtons();
     });
   }
+
   function parseUrls() {
     const text = el.urlTextarea.value.trim();
     if (!text) return [];
     return text.split(/\r?\n/).map(s => s.trim()).filter(s => s && /^https?:\/\//i.test(s));
   }
+
   function previewUrls() {
     const urls = parseUrls();
     if (urls.length === 0) { el.urlPreview.style.display = 'none'; alert('未检测到有效的图片链接'); return; }
@@ -363,6 +440,7 @@
     }
     updateButtons();
   }
+
   function previewUrlsAppend(urls) {
     const oldBtn = el.urlGrid.querySelector('.load-more-btn');
     if (oldBtn) oldBtn.remove();
@@ -380,6 +458,7 @@
       el.urlGrid.appendChild(loadMore);
     }
   }
+
   function createUrlPreviewItem(url, idx, allUrls) {
     const item = document.createElement('div');
     item.className = 'file-item url-item';
@@ -404,10 +483,13 @@
     item.appendChild(img); item.appendChild(name); item.appendChild(removeBtn);
     return item;
   }
+
+  // ====== 表格上传 ======
   function setupTableUpload() {
     el.addTableRowBtn.addEventListener('click', addTableRow);
     el.clearTableBtn.addEventListener('click', clearTable);
   }
+
   function addTableRow() {
     const row = document.createElement('div');
     row.className = 'table-row';
@@ -434,44 +516,67 @@
     updateTableCount();
     updateButtons();
   }
+
   function setTableRowFile(row, file, cell) {
     row._file = file;
     const reader = new FileReader();
     reader.onload = (e) => {
       cell.innerHTML = `<img class="table-cell-img" src="${e.target.result}" alt="${file.name}"><div class="table-cell-name">${file.name}</div><div class="table-cell-remove" title="移除">×</div>`;
       cell.classList.add('has-file');
+      cell.addEventListener('click', (ev) => {
+        if (!ev.target.closest('.table-cell-remove')) return;
+        ev.stopPropagation();
+        row._file = null;
+        cell.classList.remove('has-file');
+        cell.innerHTML = `<div class="table-cell-inner"><div class="table-cell-icon">+</div><div class="table-cell-text">点击或拖入图片</div></div><input type="file" accept="image/*" hidden>`;
+        const newInput = cell.querySelector('input');
+        newInput.addEventListener('change', (e2) => {
+          const f = e2.target.files[0];
+          if (f) setTableRowFile(row, f, cell);
+          newInput.value = '';
+        });
+        updateTableCount();
+        updateButtons();
+      });
       updateTableCount();
       updateButtons();
     };
     reader.readAsDataURL(file);
   }
+
   function refreshTableIndices() {
     el.tableGrid.querySelectorAll('.table-row').forEach((row, i) => { row.querySelector('.table-row-index').textContent = i + 1; });
   }
+
   function clearTable() {
     el.tableGrid.innerHTML = '';
     addTableRow(); addTableRow(); addTableRow();
     updateTableCount();
     updateButtons();
   }
+
   function getTableFiles() {
     const files = [];
     el.tableGrid.querySelectorAll('.table-row').forEach(row => { if (row._file) files.push(row._file); });
     return files;
   }
+
   function updateTableCount() { el.tableCount.textContent = `${getTableFiles().length} 张图片`; }
+
   function updateButtons() {
     const hasFiles = getCurrentFileCount() > 0;
     el.clearBtn.style.display = hasFiles ? 'inline-flex' : 'none';
     el.searchBtn.style.display = 'inline-flex';
     el.searchBtn.disabled = !hasFiles;
   }
+
   function getCurrentFileCount() {
     if (state.currentTab === 'batch') return state.files.length;
     if (state.currentTab === 'link') return parseUrls().length;
     if (state.currentTab === 'table') return getTableFiles().length;
     return 0;
   }
+
   function setupButtons() {
     el.clearBtn.addEventListener('click', () => {
       if (state.currentTab === 'batch') clearFiles();
@@ -482,6 +587,7 @@
     el.exportJsonBtn.addEventListener('click', exportJson);
     el.newSearchBtn.addEventListener('click', newSearch);
   }
+
   async function startSearch() {
     if (getCurrentFileCount() === 0) { alert('请先添加图片'); return; }
     el.searchBtn.disabled = true;
@@ -530,6 +636,7 @@
       el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
     }
   }
+
   function showProgress() {
     el.progressSection.style.display = 'block';
     el.resultSection.style.display = 'none';
@@ -540,12 +647,14 @@
     el.imageStatusSection.style.display = 'none';
     document.getElementById('upload-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
   function formatDuration(seconds) {
     if (seconds < 0) seconds = 0;
     const m = Math.floor(seconds / 60);
     const s = Math.floor(seconds % 60);
     return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   }
+
   function startElapsedTimer() { stopElapsedTimer(); updateElapsedDisplay(); state.elapsedTimer = setInterval(updateElapsedDisplay, 1000); }
   function stopElapsedTimer() { if (state.elapsedTimer) { clearInterval(state.elapsedTimer); state.elapsedTimer = null; } }
   function updateElapsedDisplay() {
@@ -563,6 +672,7 @@
       el.estimatedTime.textContent = '即将完成';
     } else { el.estimatedTime.textContent = '-'; }
   }
+
   function renderImageStatusList(imageStatuses) {
     if (!imageStatuses || imageStatuses.length === 0) { el.imageStatusSection.style.display = 'none'; return; }
     el.imageStatusSection.style.display = 'block';
@@ -585,6 +695,7 @@
       return `<div class="image-status-item"><span class="image-status-icon ${cfg.cls}">${cfg.icon}</span><span class="image-status-name" title="${img.name}">${img.name}</span><span class="image-status-info">${countStr}${timeStr}</span><span class="image-status-badge ${cfg.cls}">${cfg.badge}</span></div>`;
     }).join('');
   }
+
   function updateProgress(data) {
     const statusMap = { 'pending': '等待中', 'queued': '队列中', 'initializing': '初始化中', 'searching': '搜索中', 'completed': '已完成', 'failed': '失败' };
     el.progressStatus.textContent = statusMap[data.status] || data.status;
@@ -615,6 +726,7 @@
     if (data.results_count !== undefined) el.foundProducts.textContent = data.results_count;
     if (data.image_statuses) renderImageStatusList(data.image_statuses);
   }
+
   function startPolling() {
     if (state.pollingTimer) clearInterval(state.pollingTimer);
     const poll = async () => {
@@ -630,7 +742,9 @@
     poll();
     state.pollingTimer = setInterval(poll, state.pollInterval || 2000);
   }
+
   function stopPolling() { if (state.pollingTimer) { clearInterval(state.pollingTimer); state.pollingTimer = null; } stopElapsedTimer(); }
+
   async function loadResults() {
     try {
       const res = await fetch(api(`/api/results/${state.taskId}`));
@@ -640,6 +754,7 @@
       renderResults(data);
     } catch (error) { console.error('加载结果失败:', error); alert('加载结果失败: ' + error.message); }
   }
+
   const FREIGHT_BATCH_SIZE = 5;
   function normalizeFreightText(freight) { if (!freight) return ''; const text = String(freight).trim(); if (text === '包邮') return '包邮'; return text.replace(/^运费[:：]?\s*/i, '').replace(/^¥?\s*/, '¥'); }
   function setFreightButtonState(btnEl, stateName, text) {
@@ -676,6 +791,7 @@
       });
     } catch (e) { console.error('[运费批量查询] 失败:', e); selectedButtons.forEach(btn => { setFreightButtonState(btn, 'error', '运费查询失败'); setTimeout(() => { if (!btn.disabled) { btn.textContent = originalTexts.get(btn) || '查运费'; btn.classList.remove('freight-error'); btn.dataset.loading = '0'; } }, 3000); }); }
   }
+
   function renderResults(data) {
     el.progressSection.style.display = 'none';
     el.resultSection.style.display = 'block';
@@ -694,6 +810,7 @@
     renderPaginatedResults(results);
     el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
+
   function renderPaginatedResults(results) {
     const pg = state.pagination;
     const totalPages = Math.max(1, Math.ceil(pg.totalItems / pg.pageSize));
@@ -704,6 +821,7 @@
     pg.imageNames.slice(startIdx, endIdx).forEach((imageName) => { const imageData = results[imageName]; el.resultList.appendChild(createResultRow(imageName, imageData)); });
     updatePaginationControls(totalPages, startIdx, endIdx);
   }
+
   function updatePaginationControls(totalPages, startIdx, endIdx) {
     const pg = state.pagination;
     if (pg.totalItems === 0) { el.paginationWrap.style.display = 'none'; return; }
@@ -718,6 +836,7 @@
     el.pageJumpInput.max = totalPages;
     el.pageJumpInput.value = pg.currentPage;
   }
+
   function setupPagination() {
     el.pageSizeSelect.addEventListener('change', () => { state.pagination.pageSize = parseInt(el.pageSizeSelect.value); state.pagination.currentPage = 1; if (state.results) renderPaginatedResults(state.results.results || {}); });
     el.pageFirst.addEventListener('click', () => { state.pagination.currentPage = 1; if (state.results) renderPaginatedResults(state.results.results || {}); });
@@ -727,6 +846,7 @@
     el.pageJumpBtn.addEventListener('click', () => { const page = parseInt(el.pageJumpInput.value); const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize)); if (page >= 1 && page <= totalPages) { state.pagination.currentPage = page; if (state.results) renderPaginatedResults(state.results.results || {}); } });
     el.pageJumpInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') el.pageJumpBtn.click(); });
   }
+
   function createResultRow(imageName, imageData) {
     const row = document.createElement('div');
     row.className = 'result-row';
@@ -760,6 +880,7 @@
     row.appendChild(actionCell);
     return row;
   }
+
   function createMiniProductCard(item) {
     const card = document.createElement('div');
     card.className = 'mini-product-card';
@@ -778,11 +899,13 @@
     if (miniFreightBtn) miniFreightBtn.addEventListener('click', (e) => { e.stopPropagation(); queryFreightBatch(miniFreightBtn); });
     return card;
   }
+
   function setupResultModal() {
     el.resultModalOverlay.addEventListener('click', closeResultModal);
     el.resultModalClose.addEventListener('click', closeResultModal);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el.resultModal.style.display !== 'none') closeResultModal(); });
   }
+
   function openResultModal(imageName, imageUrl, sortedItems, imageData) {
     el.resultModalThumb.src = imageUrl || '';
     el.resultModalTitle.textContent = imageName;
@@ -792,7 +915,9 @@
     el.resultModal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
   }
+
   function closeResultModal() { el.resultModal.style.display = 'none'; document.body.style.overflow = ''; }
+
   function createFullProductCard(item) {
     const card = document.createElement('div');
     card.className = 'product-card';
@@ -808,8 +933,11 @@
     if (fullFreightBtn) fullFreightBtn.addEventListener('click', (e) => { e.stopPropagation(); queryFreightBatch(fullFreightBtn); });
     return card;
   }
+
   function exportJson() { if (!state.results) return; const dataStr = JSON.stringify(state.results, null, 2); const blob = new Blob([dataStr], { type: 'application/json' }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href = url; a.download = `1688图搜结果_${state.taskId}.json`; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url); }
+
   function newSearch() { cleanupCurrentTask(); state.taskId = null; state.results = null; stopPolling(); clearFiles(); el.urlTextarea.value = ''; el.urlPreview.style.display = 'none'; state.urlVisibleCount = PREVIEW_INITIAL; clearTable(); el.resultSection.style.display = 'none'; el.progressSection.style.display = 'none'; el.uploadTiming.style.display = 'none'; el.paginationWrap.style.display = 'none'; el.searchBtn.disabled = false; el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>'; window.scrollTo({ top: 0, behavior: 'smooth' }); }
+
   function setupSettings() {
     if (!el.settingsBtn) return;
     el.settingsBtn.addEventListener('click', openSettings);
@@ -822,6 +950,7 @@
     if (!getApiBase()) setTimeout(openSettings, 500);
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && el.settingsModal.style.display !== 'none') closeSettings(); });
   }
+
   function openSettings() {
     el.apiBaseInput.value = getApiBase();
     const hint = document.getElementById('apiHint');
@@ -829,7 +958,9 @@
     el.settingsModal.style.display = 'flex';
     checkConnection();
   }
+
   function closeSettings() { el.settingsModal.style.display = 'none'; }
+
   function saveSettings() {
     const url = el.apiBaseInput.value.trim();
     setApiBase(url);
@@ -839,6 +970,7 @@
     btn.innerHTML = '<span>✓ 已保存</span>';
     setTimeout(() => { btn.innerHTML = originalText; }, 1500);
   }
+
   async function checkConnection() {
     const statusDot = el.connectionStatus.querySelector('.status-dot');
     const statusText = el.connectionStatus.querySelector('.status-text');
@@ -855,8 +987,10 @@
       else { statusDot.className = 'status-dot disconnected'; statusText.textContent = '连接失败'; }
     } catch (error) { statusDot.className = 'status-dot disconnected'; statusText.textContent = '无法连接'; }
   }
+
   function formatTime(isoString) { if (!isoString) return '-'; try { return new Date(isoString).toLocaleString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }); } catch { return isoString; } }
   function formatPrice(price) { if (price === undefined || price === null || price === '') return '面议'; const num = parseFloat(String(price).replace(/[^\d.]/g, '')); if (isNaN(num)) return String(price); return '¥' + num.toFixed(2); }
   function extractOfferId(url) { if (!url) return null; const m = String(url).match(/offer\/(\d+)/); return m ? m[1] : null; }
+
   document.addEventListener('DOMContentLoaded', init);
 })();
