@@ -174,7 +174,7 @@
     resultList: document.getElementById('resultList'),
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     newSearchBtn: document.getElementById('newSearchBtn'),
-
+    newSearchBtn: document.getElementById('newSearchBtn'),
     // 查看更多弹窗
     resultModal: document.getElementById('resultModal'),
     resultModalOverlay: document.getElementById('resultModalOverlay'),
@@ -256,14 +256,14 @@
   function setupLifecycleCleanup() {
     window.addEventListener('pagehide', (event) => {
       if (event.persisted === true) return;
+      try { stopPolling(); stopElapsedTimer(); } catch (e) {}
+      cleanupCurrentTask();
+    });
+    window.addEventListener('beforeunload', () => {
+      try { stopPolling(); stopElapsedTimer(); } catch (e) {}
       cleanupCurrentTask();
     });
   }
-  // ====== Tab 切换 ======
-  function setupTabs() {
-    if (!el.uploadTabs) return;
-    el.uploadTabs.addEventListener('click', (e) => {
-      const tab = e.target.closest('.upload-tab');
       if (!tab) return;
       const tabName = tab.dataset.tab;
       switchTab(tabName);
@@ -722,7 +722,7 @@
   }
 
   // ====== 开始搜索 ======
-  async function startSearch() {
+    el.newSearchBtn.addEventListener('click', newSearch);
     if (getCurrentFileCount() === 0) {
       alert('请先添加图片');
       return;
@@ -1923,3 +1923,24 @@
   document.addEventListener('DOMContentLoaded', init);
 
 })();
+
+  async function stopCurrentTask() {
+    if (!state.taskId) return;
+    const tid = state.taskId;
+    try {
+      await fetchWithRetry(`/api/tasks/${encodeURIComponent(tid)}/cancel`, {method: 'POST'}, {attempts: 2, timeoutMs: 5000, stage: '取消任务'});
+    } catch (e) {
+      console.warn('取消任务失败', e);
+    }
+    try { stopPolling(); stopElapsedTimer(); } catch (e) {}
+    state.taskId = null;
+    state.results = null;
+    el.progressSection.style.display = 'none';
+    el.resultSection.style.display = 'none';
+    if (typeof el.searchBtn !== 'undefined' && el.searchBtn) {
+      el.searchBtn.disabled = false;
+      el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
+    }
+    alert(`任务 ${tid} 已停止并丢弃结果`);
+  }
+
