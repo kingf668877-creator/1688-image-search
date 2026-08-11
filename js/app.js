@@ -7,7 +7,7 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://age-tear-procedures-exchanges.trycloudflare.com';
+  const DEFAULT_API_BASE = 'https://yidong.dianleida.net:22000';
   const LEGACY_API_BASES = new Set([
     'https://corporate-thousand-cool-fixes.trycloudflare.com',
     'https://homework-jvc-terms-funky.trycloudflare.com',
@@ -21,6 +21,10 @@
     'https://generator-context-terrorism-junior.trycloudflare.com',
     'https://anyone-wages-plots-losses.trycloudflare.com',
     'https://kiss-impressed-prevention-buffalo.trycloudflare.com',
+    'https://substantially-removed-think-dublin.trycloudflare.com',
+    'https://checklist-paperbacks-parking-authorized.trycloudflare.com',
+    'https://parallel-west-msie-approved.trycloudflare.com',
+    'https://age-tear-procedures-exchanges.trycloudflare.com',
   ]);
   const getApiBase = () => {
     const saved = localStorage.getItem('apiBase');
@@ -588,6 +592,7 @@
     el.newSearchBtn.addEventListener('click', newSearch);
   }
 
+  // ====== 开始搜索 ======
   async function startSearch() {
     if (getCurrentFileCount() === 0) { alert('请先添加图片'); return; }
     el.searchBtn.disabled = true;
@@ -954,7 +959,7 @@
   function openSettings() {
     el.apiBaseInput.value = getApiBase();
     const hint = document.getElementById('apiHint');
-    if (hint) hint.innerHTML = `默认公网后端：<br><code>${DEFAULT_API_BASE}</code><br>网页首次打开会自动使用该地址，无需手动设置。`;
+    if (hint) hint.innerHTML = `默认公网后端：<br><code>${DEFAULT_API_BASE}</code><br>网页首次打开会自动使用该地址，无需手动设置。<br><small style="color:#999;">如果地址变更，请清空浏览器缓存后重新打开</small>`;
     el.settingsModal.style.display = 'flex';
     checkConnection();
   }
