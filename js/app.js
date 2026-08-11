@@ -1184,7 +1184,7 @@
   // ====== 加载结果 ======
   async function loadResults() {
     try {
-      const res = await fetch(api(`/api/results/${state.taskId}`));
+      const res = await fetch(api(`/api/results/${state.taskId}?limit=500&offset=0`));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取结果失败');
       state.results = data;
