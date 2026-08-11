@@ -212,7 +212,7 @@
 
   // ====== 初始化 ======
   function init() {
-    setupTabs();
+  function init() { try { initCore(); } catch (err) { console.error('[init] 异常，启用安全模式:', err); runSafeMode(); } }   function initCore() {
     setupDragAndDrop();
     setupFileInput();
     setupUrlUpload();
@@ -1943,4 +1943,39 @@
     }
     alert(`任务 ${tid} 已停止并丢弃结果`);
   }
+
+
+  // ====== 安全模式：任何 JS 错误时都能让用户继续上传 ======
+  function runSafeMode() {
+    console.warn('安全模式启动：所有交互将使用最小化逻辑');
+    try {
+      document.querySelectorAll('.upload-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+          document.querySelectorAll('.upload-tab').forEach(t => t.classList.remove('active'));
+          tab.classList.add('active');
+          const id = 'panel-' + tab.dataset.tab;
+          document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.remove('active'));
+          const panel = document.getElementById(id);
+          if (panel) panel.classList.add('active');
+        });
+      });
+      const ta = document.getElementById('urlTextarea');
+      const btn = document.getElementById('searchBtn');
+      if (btn) {
+        btn.disabled = false;
+        btn.addEventListener('click', async () => {
+          if (!ta) return alert('未找到链接输入框');
+          const urls = (ta.value || '').split(/\\r?\\n/).map(s => s.trim()).filter(s => /^https?:\\/\\//i.test(s));
+          if (!urls.length) return alert('请先粘贴图片链接');
+          btn.disabled = true; btn.innerHTML = '正在上传...';
+          const api = (typeof getApiBase === 'function' ? getApiBase() : 'https://yidong.dianleida.net:22000') + '/api/upload_urls';
+          const resp = await fetch(api, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({urls: urls.slice(0,20), auto_search:true, expected_total:urls.length, is_last_batch: true})});
+          const j = await resp.json().catch(() => ({}));
+          alert('任务已创建: ' + (j.task_id || JSON.stringify(j)));
+          btn.disabled = false; btn.innerHTML = '开始批量搜索';
+        });
+      }
+    } catch (err) { console.error('安全模式也挂了', err); }
+  }
+  window.addEventListener('unhandledrejection', e => { console.warn('未处理的 Promise 错误:', e.reason); });
 
