@@ -740,7 +740,7 @@
         // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
         const totalUrls = urls.length;
-        const CHUNK_SIZE = 500; // 单批最大URL数，500张以内一次发送
+        const CHUNK_SIZE = 20; // 仅控制单次请求大小，总URL数量不设上限
         const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
         let taskId = null;
         let totalUploaded = 0;
