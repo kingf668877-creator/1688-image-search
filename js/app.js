@@ -7,7 +7,7 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'http://192.168.1.35:5000';
+  const DEFAULT_API_BASE = 'https://yidong.dianleida.net:22000';
   const LEGACY_API_BASES = new Set([
     'https://corporate-thousand-cool-fixes.trycloudflare.com',
     'https://homework-jvc-terms-funky.trycloudflare.com',
