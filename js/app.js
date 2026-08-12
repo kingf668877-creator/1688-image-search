@@ -709,6 +709,7 @@
       if (state.currentTab === 'link') {
         // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
+        const totalUrls = urls.length;
         const CHUNK_SIZE = 10; // 单次请求最多 10 张 URL，云端 nginx body 限制更严
 
         const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
