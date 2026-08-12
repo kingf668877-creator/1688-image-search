@@ -212,7 +212,7 @@
 
     // ====== 初始化 ======
   function init() {
-    try { initCore(); } catch (err) { console.error(err); runSafeMode(); }
+    try { initCore(); } catch (err) { console.error(err); }
   }
 
   function initCore() {
