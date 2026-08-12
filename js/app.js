@@ -1208,13 +1208,23 @@
     if (selectedButtons.length === 0) return;
 
     const originalTexts = new Map();
+    const apiButtons = [];
     selectedButtons.forEach(btn => {
-      originalTexts.set(btn, btn.textContent);
-      setFreightButtonState(btn, 'loading', '查询中...');
+      const hint = (btn.dataset.freightHint || '').trim();
+      if (hint && (hint.includes('包邮') || hint.includes('免运费') || hint.includes('运费'))) {
+        const freightText = (hint.includes('包邮') || hint.includes('免运费')) ? '包邮' : hint;
+        setFreightButtonState(btn, 'done', '运费: ' + freightText);
+        btn.disabled = true;
+      } else {
+        originalTexts.set(btn, btn.textContent);
+        setFreightButtonState(btn, 'loading', '查询中...');
+        apiButtons.push(btn);
+      }
     });
+    if (apiButtons.length === 0) return;
 
     try {
-      const offerIds = selectedButtons.map(btn => btn.dataset.offerId);
+      const offerIds = apiButtons.map(btn => btn.dataset.offerId);
       const res = await fetchWithRetry('/api/freight_batch', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -1229,7 +1239,7 @@
         throw new Error(data.error || '批量获取运费失败');
       }
 
-      selectedButtons.forEach(btn => {
+      apiButtons.forEach(btn => {
         const offerId = btn.dataset.offerId;
         const freight = normalizeFreightText(data.results?.[offerId]);
         const itemStatus = data.statuses?.[offerId]?.status || '';
@@ -1241,13 +1251,21 @@
           setFreightButtonState(btn, 'error', '访问受限，请稍后重试');
           btn.disabled = false;
         } else {
-          setFreightButtonState(btn, 'error', '暂无运费信息');
-          btn.disabled = true;
+          const hint2 = (btn.dataset.freightHint || '').trim();
+            const detailUrl = btn.dataset.detailUrl || '#';
+            if (hint2 && (hint2.includes('包邮') || hint2.includes('运费'))) {
+              setFreightButtonState(btn, 'done', '运费: ' + (hint2.includes('包邮') ? '包邮' : hint2));
+            } else {
+              btn.classList.remove('freight-loading', 'freight-error');
+              btn.classList.add('freight-done');
+              btn.innerHTML = '<a href="' + detailUrl + '" target="_blank" style="color:inherit;text-decoration:none;font-size:inherit;">详情页运费</a>';
+            }
+            btn.disabled = true;
         }
       });
     } catch (e) {
       console.error('[运费批量查询] 失败:', e);
-      selectedButtons.forEach(btn => {
+      apiButtons.forEach(btn => {
         setFreightButtonState(btn, 'error', '运费查询失败');
         setTimeout(() => {
           if (!btn.disabled) {
@@ -1527,7 +1545,8 @@
     // 查运费按钮
     const offerId = item.offer_id || extractOfferId(item.url);
     if (offerId) {
-      deliveryParts.push(`<button class="mini-freight-btn" data-offer-id="${offerId}">查运费</button>`);
+      const _hint = (item.price_description || '').replace(/"/g, '&quot;');
+      deliveryParts.push(`<button class="mini-freight-btn" data-offer-id="${offerId}" data-freight-hint="${_hint}" data-detail-url="${item.url || '#'}">查运费</button>`);
     }
     deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
 
@@ -1675,7 +1694,8 @@
     // 查运费按钮
     const fullOfferId = item.offer_id || extractOfferId(item.url);
     if (fullOfferId) {
-      deliveryParts.push(`<button class="freight-btn" data-offer-id="${fullOfferId}">查运费</button>`);
+      const _fullHint = (item.price_description || '').replace(/"/g, '&quot;');
+    deliveryParts.push(`<button class="freight-btn" data-offer-id="${fullOfferId}" data-freight-hint="${_fullHint}" data-detail-url="${item.url || '#'}">查运费</button>`);
     }
     deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
 
