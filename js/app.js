@@ -210,66 +210,35 @@
     pageSizeSelect: document.getElementById('pageSizeSelect'),
   };
 
-  // ====== 初始化 ======
+    // ====== 初始化 ======
   function init() {
-  function init() { try { initCore(); } catch (err) { console.error('[init] 异常，启用安全模式:', err); runSafeMode(); } }   function initCore() {
+    try { initCore(); } catch (err) { console.error(err); runSafeMode(); }
+  }
+
+  function initCore() {
     setupDragAndDrop();
     setupFileInput();
     setupUrlUpload();
     setupTableUpload();
+    setupTabs();
     setupButtons();
     setupSettings();
     setupResultModal();
     setupPagination();
     setupLifecycleCleanup();
-    // 初始添加 3 行表格
-    addTableRow();
-    addTableRow();
-    addTableRow();
+    addTableRow(); addTableRow(); addTableRow();
     updateButtons();
   }
 
-  // ====== Page lifecycle cleanup ======
-  function cleanupCurrentTask() {
-    const taskId = state.taskId;
-    if (!taskId || state.cleanupSentTaskId === taskId) return;
-
-    state.cleanupSentTaskId = taskId;
-    const url = api(`/api/tasks/${encodeURIComponent(taskId)}/cleanup`);
-    const body = JSON.stringify({ task_id: taskId });
-    const blob = new Blob([body], { type: 'application/json' });
-
-    try {
-      if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
-    } catch (error) {
-      console.warn('Task cleanup Beacon failed:', error);
-    }
-
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(error => console.warn('Task cleanup request failed:', error));
-  }
-
-  function setupLifecycleCleanup() {
-    window.addEventListener('pagehide', (event) => {
-      if (event.persisted === true) return;
-      try { stopPolling(); stopElapsedTimer(); } catch (e) {}
-      cleanupCurrentTask();
-    });
-    window.addEventListener('beforeunload', () => {
-      try { stopPolling(); stopElapsedTimer(); } catch (e) {}
-      cleanupCurrentTask();
+  function setupTabs() {
+    if (!el.uploadTabs) return;
+    el.uploadTabs.querySelectorAll(".upload-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        if (!tab) return;
+        switchTab(tab.dataset.tab);
+      });
     });
   }
-      if (!tab) return;
-      const tabName = tab.dataset.tab;
-      switchTab(tabName);
-    });
-  }
-
   function switchTab(tabName) {
     state.currentTab = tabName;
     // 切换按钮高亮
@@ -722,7 +691,8 @@
   }
 
   // ====== 开始搜索 ======
-    el.newSearchBtn.addEventListener('click', newSearch);
+  // ====== 开始搜索 ======
+  async function startSearch() {
     if (getCurrentFileCount() === 0) {
       alert('请先添加图片');
       return;
@@ -1943,39 +1913,4 @@
     }
     alert(`任务 ${tid} 已停止并丢弃结果`);
   }
-
-
-  // ====== 安全模式：任何 JS 错误时都能让用户继续上传 ======
-  function runSafeMode() {
-    console.warn('安全模式启动：所有交互将使用最小化逻辑');
-    try {
-      document.querySelectorAll('.upload-tab').forEach(tab => {
-        tab.addEventListener('click', () => {
-          document.querySelectorAll('.upload-tab').forEach(t => t.classList.remove('active'));
-          tab.classList.add('active');
-          const id = 'panel-' + tab.dataset.tab;
-          document.querySelectorAll('[id^="panel-"]').forEach(p => p.classList.remove('active'));
-          const panel = document.getElementById(id);
-          if (panel) panel.classList.add('active');
-        });
-      });
-      const ta = document.getElementById('urlTextarea');
-      const btn = document.getElementById('searchBtn');
-      if (btn) {
-        btn.disabled = false;
-        btn.addEventListener('click', async () => {
-          if (!ta) return alert('未找到链接输入框');
-          const urls = (ta.value || '').split(/\\r?\\n/).map(s => s.trim()).filter(s => /^https?:\\/\\//i.test(s));
-          if (!urls.length) return alert('请先粘贴图片链接');
-          btn.disabled = true; btn.innerHTML = '正在上传...';
-          const api = (typeof getApiBase === 'function' ? getApiBase() : 'https://yidong.dianleida.net:22000') + '/api/upload_urls';
-          const resp = await fetch(api, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({urls: urls.slice(0,20), auto_search:true, expected_total:urls.length, is_last_batch: true})});
-          const j = await resp.json().catch(() => ({}));
-          alert('任务已创建: ' + (j.task_id || JSON.stringify(j)));
-          btn.disabled = false; btn.innerHTML = '开始批量搜索';
-        });
-      }
-    } catch (err) { console.error('安全模式也挂了', err); }
-  }
-  window.addEventListener('unhandledrejection', e => { console.warn('未处理的 Promise 错误:', e.reason); });
 
