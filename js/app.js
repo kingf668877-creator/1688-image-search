@@ -709,7 +709,7 @@
       if (state.currentTab === 'link') {
         // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
-        const totalUrls = urls.length;
+        const CHUNK_SIZE = 10; // 单次请求最多 10 张 URL，云端 nginx body 限制更严
         const CHUNK_SIZE = 20; // 仅控制单次请求大小，总URL数量不设上限
         const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
         let taskId = null;
@@ -821,8 +821,8 @@
                   request_id: chunkRequestId,
                 }),
               }, {
-                attempts: 3,
-                timeoutMs: 180000,
+                attempts: 6,
+                timeoutMs: 300000,
                 stage: `第 ${chunkIdx + 1}/${totalChunks} 批图片上传`,
                 onRetry: (attempt, attempts) => {
                   updateProgress({
