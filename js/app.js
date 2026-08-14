@@ -1166,118 +1166,6 @@
     }
   }
 
-  // ====== 运费查询（点击一次并发查询最多 5 个商品） ======
-  const FREIGHT_BATCH_SIZE = 5;
-
-  function normalizeFreightText(freight) {
-    if (!freight) return '';
-    const text = String(freight).trim();
-    if (text === '包邮') return '包邮';
-    return text.replace(/^运费[:：]?\s*/i, '').replace(/^¥?\s*/, '¥');
-  }
-
-  function setFreightButtonState(btnEl, stateName, text) {
-    btnEl.classList.remove('freight-loading', 'freight-done', 'freight-error');
-    btnEl.dataset.loading = stateName === 'loading' ? '1' : '0';
-    if (stateName === 'loading') btnEl.classList.add('freight-loading');
-    if (stateName === 'done') btnEl.classList.add('freight-done');
-    if (stateName === 'error') btnEl.classList.add('freight-error');
-    btnEl.textContent = text;
-  }
-
-  async function queryFreightBatch(clickedBtn) {
-    if (!clickedBtn || clickedBtn.dataset.loading === '1' || clickedBtn.disabled) return;
-    const root = clickedBtn.closest('.result-row, .result-modal, body') || document;
-    const buttons = Array.from(root.querySelectorAll('.mini-freight-btn, .freight-btn'))
-      .filter(btn => btn.dataset.offerId && btn.dataset.loading !== '1' && !btn.disabled);
-    const clickedIndex = buttons.indexOf(clickedBtn);
-    const orderedButtons = clickedIndex >= 0
-      ? buttons.slice(clickedIndex).concat(buttons.slice(0, clickedIndex))
-      : [clickedBtn].concat(buttons.filter(btn => btn !== clickedBtn));
-
-    const selectedButtons = [];
-    const seenOfferIds = new Set();
-    for (const btn of orderedButtons) {
-      const offerId = btn.dataset.offerId;
-      if (!seenOfferIds.has(offerId)) {
-        seenOfferIds.add(offerId);
-        selectedButtons.push(btn);
-      }
-      if (selectedButtons.length >= FREIGHT_BATCH_SIZE) break;
-    }
-    if (selectedButtons.length === 0) return;
-
-    const originalTexts = new Map();
-    const apiButtons = [];
-    selectedButtons.forEach(btn => {
-      const hint = (btn.dataset.freightHint || '').trim();
-      if (hint && (hint.includes('包邮') || hint.includes('免运费') || hint.includes('运费'))) {
-        const freightText = (hint.includes('包邮') || hint.includes('免运费')) ? '包邮' : hint;
-        setFreightButtonState(btn, 'done', '运费: ' + freightText);
-        btn.disabled = true;
-      } else {
-        originalTexts.set(btn, btn.textContent);
-        setFreightButtonState(btn, 'loading', '查询中...');
-        apiButtons.push(btn);
-      }
-    });
-    if (apiButtons.length === 0) return;
-
-    try {
-      const offerIds = apiButtons.map(btn => btn.dataset.offerId);
-      const res = await fetchWithRetry('/api/freight_batch', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({offer_ids: offerIds}),
-      }, {
-        attempts: 2,
-        timeoutMs: 120000,
-        stage: `${offerIds.length} 个商品运费批量查询`,
-      });
-      const data = await res.json();
-      if (!res.ok || !data.success) {
-        throw new Error(data.error || '批量获取运费失败');
-      }
-
-      apiButtons.forEach(btn => {
-        const offerId = btn.dataset.offerId;
-        const freight = normalizeFreightText(data.results?.[offerId]);
-        const itemStatus = data.statuses?.[offerId]?.status || '';
-        if (freight) {
-          const cached = itemStatus === 'cache' || itemStatus === 'stale_cache';
-          setFreightButtonState(btn, 'done', `运费: ${freight}${cached ? '（缓存）' : ''}`);
-          btn.disabled = true;
-        } else if (itemStatus === 'blocked' || itemStatus === 'circuit_open') {
-          setFreightButtonState(btn, 'error', '访问受限，请稍后重试');
-          btn.disabled = false;
-        } else {
-          const hint2 = (btn.dataset.freightHint || '').trim();
-            const detailUrl = btn.dataset.detailUrl || '#';
-            if (hint2 && (hint2.includes('包邮') || hint2.includes('运费'))) {
-              setFreightButtonState(btn, 'done', '运费: ' + (hint2.includes('包邮') ? '包邮' : hint2));
-            } else {
-              btn.classList.remove('freight-loading', 'freight-error');
-              btn.classList.add('freight-done');
-              btn.innerHTML = '<a href="' + detailUrl + '" target="_blank" style="color:inherit;text-decoration:none;font-size:inherit;">详情页运费</a>';
-            }
-            btn.disabled = true;
-        }
-      });
-    } catch (e) {
-      console.error('[运费批量查询] 失败:', e);
-      apiButtons.forEach(btn => {
-        setFreightButtonState(btn, 'error', '运费查询失败');
-        setTimeout(() => {
-          if (!btn.disabled) {
-            btn.textContent = originalTexts.get(btn) || '查运费';
-            btn.classList.remove('freight-error');
-            btn.dataset.loading = '0';
-          }
-        }, 3000);
-      });
-    }
-  }
-
   // ====== 渲染结果（列表方式：一行一图） ======
   function renderResults(data) {
     el.progressSection.style.display = 'none';
@@ -1536,19 +1424,15 @@
     }
 
     // 运费 + 揽收时效
-    let deliveryHtml = '';
     const deliveryParts = [];
-    // 不展示图搜返回的运费信息(price_description)，只保留查运费按钮
+    const priceDescription = String(item.price_description || '').trim();
+    if (priceDescription) {
+      deliveryParts.push(`<span class="mini-delivery-item mini-freight">运费：${priceDescription}</span>`);
+    }
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
     }
-    // 查运费按钮
-    const offerId = item.offer_id || extractOfferId(item.url);
-    if (offerId) {
-      const _hint = (item.price_description || '').replace(/"/g, '&quot;');
-      deliveryParts.push(`<button class="mini-freight-btn" data-offer-id="${offerId}" data-freight-hint="${_hint}" data-detail-url="${item.url || '#'}">查运费</button>`);
-    }
-    deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
+    const deliveryHtml = deliveryParts.length ? `<div class="mini-delivery-row">${deliveryParts.join(String())}</div>` : '';
 
     // 店铺 + 城市 + 开店年限
     let shopHtml = '';
@@ -1600,14 +1484,6 @@
       });
     }
 
-    // 查运费按钮事件
-    const miniFreightBtn = card.querySelector('.mini-freight-btn');
-    if (miniFreightBtn) {
-      miniFreightBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        queryFreightBatch(miniFreightBtn);
-      });
-    }
     return card;
   }
   function setupResultModal() {
@@ -1685,19 +1561,15 @@
     }
 
     // 运费 + 揽收时效
-    let deliveryHtml = '';
     const deliveryParts = [];
-    // 不展示图搜返回的运费信息(price_description)，只保留查运费按钮
+    const priceDescription = String(item.price_description || '').trim();
+    if (priceDescription) {
+      deliveryParts.push(`<span class="delivery-item freight-text">运费：${priceDescription}</span>`);
+    }
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
     }
-    // 查运费按钮
-    const fullOfferId = item.offer_id || extractOfferId(item.url);
-    if (fullOfferId) {
-      const _fullHint = (item.price_description || '').replace(/"/g, '&quot;');
-    deliveryParts.push(`<button class="freight-btn" data-offer-id="${fullOfferId}" data-freight-hint="${_fullHint}" data-detail-url="${item.url || '#'}">查运费</button>`);
-    }
-    deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
+    const deliveryHtml = deliveryParts.length ? `<div class="product-delivery">${deliveryParts.join(String())}</div>` : '';
 
     // 店铺信息：店名 + 城市 + 开店年限
     let shopHtml = '';
@@ -1752,14 +1624,6 @@
       });
     }
 
-    // 查运费按钮事件
-    const fullFreightBtn = card.querySelector('.freight-btn');
-    if (fullFreightBtn) {
-      fullFreightBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        queryFreightBatch(fullFreightBtn);
-      });
-    }
     return card;
   }
 
@@ -1903,12 +1767,6 @@
     return '¥' + num.toFixed(2);
   }
 
-  // 从URL中提取offerId
-  function extractOfferId(url) {
-    if (!url) return null;
-    const m = String(url).match(/offer\/(\d+)/);
-    return m ? m[1] : null;
-  }
 
   // ====== 启动 ======
   document.addEventListener('DOMContentLoaded', init);
