@@ -1425,7 +1425,7 @@
 
     // 运费 + 揽收时效
     const deliveryParts = [];
-    const priceDescription = String(item.price_description || '').trim();
+    const priceDescription = String(item.priceDescription || '').trim();
     if (priceDescription) {
       deliveryParts.push(`<span class="mini-delivery-item mini-freight">运费：${priceDescription}</span>`);
     }
@@ -1562,7 +1562,7 @@
 
     // 运费 + 揽收时效
     const deliveryParts = [];
-    const priceDescription = String(item.price_description || '').trim();
+    const priceDescription = String(item.priceDescription || '').trim();
     if (priceDescription) {
       deliveryParts.push(`<span class="delivery-item freight-text">运费：${priceDescription}</span>`);
     }
