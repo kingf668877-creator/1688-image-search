@@ -161,33 +161,25 @@
           </div>
         </div>
 
-        <!-- 方式三：图片表格批量上传 -->
+        <!-- 方式三：表格批量上传 (Excel / CSV) -->
         <div class="upload-panel" id="panel-table">
           <div class="table-upload-wrap">
-            <p class="panel-hint"><b>方式 A：上传 Excel / CSV 表格</b>（按列名识别图片链接，自动填入下方链接区）</p>
+            <p class="panel-hint">上传 Excel (.xlsx/.xls) 或 CSV 文件，自动识别表格中的图片链接</p>
             <label class="spreadsheet-drop-zone" for="tableFileInput">
               <span class="spreadsheet-icon">��</span>
               <strong>点击选择表格文件</strong>
-              <span>支持 .xlsx / .xls / .csv</span>
+              <span>支持 .xlsx / .xls / .csv 格式</span>
               <input id="tableFileInput" type="file" accept=".xlsx,.xls,.csv" multiple hidden>
             </label>
-            <div class="table-file-list" id="tableFileList" style="display:none"></div>
-            <p class="panel-hint" style="margin-top:16px;"><b>方式 B：手动添加行</b>（每个单元格选一张图片）</p>
-            <div class="table-grid" id="tableGrid">
-              <!-- 表格行由 JS 动态生成 -->
-            </div>
-            <div class="table-actions">
-              <button class="btn btn-outline" id="addTableRowBtn">
-                <span>+ 添加一行</span>
-              </button>
-              <button class="btn btn-ghost" id="clearTableBtn">
-                <span>清空全部</span>
-              </button>
-              <span class="table-count" id="tableCount">0 张图片</span>
+            <div class="table-file-list" id="tableFileList" style="display:none;"></div>
+            <p class="spreadsheet-hint">从表格中提取的图片链接（每行一个）</p>
+            <textarea id="tableLinksTextarea" class="spreadsheet-links-textarea" placeholder="从上方表格文件中提取链接后会自动填入这里；也可以手动粘贴/编辑。"></textarea>
+            <div class="spreadsheet-links-meta">
+              <span id="tableLinksMeta" class="count-badge">0 条链接</span>
+              <span>手动编辑后点击「开始批量搜索」即可</span>
             </div>
           </div>
         </div>
-
         <!-- 操作按钮（三种方式共用） -->
         <div class="upload-actions">
           <button class="btn btn-ghost" id="clearBtn" style="display: none;">
