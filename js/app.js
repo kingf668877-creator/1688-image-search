@@ -1111,8 +1111,10 @@
       if (!res.ok) throw new Error(data.error || '获取结果失败');
       state.results = data;
       if (!keepResults) {
+        // 第一次进入结果区：渲染统计卡 + 第一页
         renderResults(data);
       } else {
+        // 翻页：仅重渲染当前页列表
         renderPaginatedResults(data);
       }
     } catch (error) {
@@ -1258,6 +1260,7 @@
     if (target === state.pagination.currentPage) return;
     state.pagination.currentPage = target;
     loadResultsPage({ keepResults: true }).then(() => {
+      // 滚到当前页第一行
       const firstRow = el.resultList.querySelector('.result-row');
       if (firstRow) {
         firstRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -1555,6 +1558,104 @@
         <div class="file-grid-name">${safe.slice(0, 40)}${safe.length > 40 ? '…' : ''}</div>
       </div>`;
     }).join('');
+  }
+
+  // ====== SheetJS fallback (xlsx 解析) ======
+  let sheetJSPromise = null;
+  async function loadSheetJSFallback() {
+    if (typeof XLSX !== 'undefined') return;
+    if (sheetJSPromise) return sheetJSPromise;
+    sheetJSPromise = new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+      s.onload = resolve;
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+    return sheetJSPromise;
+  }
+
+  async function parseSpreadsheet(file) {
+    const ext = file.name.split('.').pop().toLowerCase();
+    const buf = await file.arrayBuffer();
+    if (ext === 'csv') {
+      const text = new TextDecoder('utf-8').decode(buf);
+      const urls = [];
+      text.split(/\r?\n/).forEach(line => {
+        const parts = line.split(/[,\t;|]/);
+        parts.forEach(p => {
+          const t = p.trim().replace(/^"|"$/g, '');
+          if (/^https?:\/\//i.test(t)) urls.push(t);
+        });
+      });
+      return urls;
+    }
+    await loadSheetJSFallback();
+    if (typeof XLSX === 'undefined') throw new Error('无法加载 xlsx 库');
+    const wb = XLSX.read(buf, { type: 'array' });
+    const urls = [];
+    wb.SheetNames.forEach(name => {
+      const sheet = wb.Sheets[name];
+      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+      rows.forEach(row => {
+        row.forEach(cell => {
+          const t = String(cell || '').trim();
+          if (/^https?:\/\//i.test(t)) urls.push(t);
+        });
+      });
+    });
+    return urls;
+  }
+
+  // ====== 导出 JSON / 新建搜索 ======
+  function exportJson() {
+    if (!state.results) { alert('暂无结果'); return; }
+    const dataStr = JSON.stringify(state.results, null, 2);
+    const blob = new Blob([dataStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `1688-results-${Date.now()}.json`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  function newSearch() {
+    if (!confirm('新建搜索将清空当前结果, 是否继续?')) return;
+    if (el.resultSection) el.resultSection.hidden = true;
+    state.results = null;
+    state.tableLinks = [];
+    state.files = [];
+    if (el.fileGrid) el.fileGrid.innerHTML = '';
+    if (el.urlTextarea) el.urlTextarea.value = '';
+    if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
+    if (el.fileList) el.fileList.style.display = 'none';
+    if (el.tableFileInfo) el.tableFileInfo.hidden = true;
+    if (el.urlPreview) el.urlPreview.style.display = 'none';
+    if (el.progressSection) el.progressSection.style.display = 'none';
+    if (el.timingVal) el.timingVal.textContent = '0';
+    if (el.timing) el.timing.hidden = true;
+    updateButtons();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function checkConnection() {
+    // 异步 ping 后端
+    fetch(api('/api/health'), { method: 'GET' })
+      .then(r => {
+        if (r.ok) {
+          if (el.connectionStatus) {
+            el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">已连接</span>';
+          }
+        } else {
+          if (el.connectionStatus) {
+            el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">连接失败</span>';
+          }
+        }
+      })
+      .catch(() => {
+        if (el.connectionStatus) {
+          el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">离线</span>';
+        }
+      });
   }
 
   // ====== 启动 ======
