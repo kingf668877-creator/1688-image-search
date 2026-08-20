@@ -869,7 +869,9 @@
 
   // ====== 进度显示 ======
   function showProgress() {
+    el.progressSection.hidden = false;
     el.progressSection.style.display = 'block';
+    el.resultSection.hidden = true;
     el.resultSection.style.display = 'none';
     // 重置计时器状态
     state.searchStartedAt = null;
@@ -1151,7 +1153,9 @@
 
   // ====== 渲染结果（列表方式：一行一图） ======
   function renderResults(data) {
+    el.progressSection.hidden = true;
     el.progressSection.style.display = 'none';
+    el.resultSection.hidden = false;
     el.resultSection.style.display = 'block';
 
     const totalImages = data.total_images || 0;
