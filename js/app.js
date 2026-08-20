@@ -149,6 +149,20 @@
     addTableRowBtn: document.getElementById('addTableRowBtn'),
     clearTableBtn: document.getElementById('clearTableBtn'),
     tableCount: document.getElementById('tableCount'),
+    // Excel 表格上传 (与原 table 上传并存)
+    tableFileInput: document.getElementById('tableFileInput'),
+    tableFileList: document.getElementById('tableFileList'),
+    // 悬浮分页条
+    resultPager: document.getElementById('resultPager'),
+    pagerSentinel: document.getElementById('pagerSentinel'),
+    pagerInfo: document.getElementById('pagerInfo'),
+    pagerPages: document.getElementById('pagerPages'),
+    pagerSizeInput: document.getElementById('pagerSizeInput'),
+    pagerPrev: document.getElementById('pagerPrev'),
+    pagerNext: document.getElementById('pagerNext'),
+    pagerTop: document.getElementById('pagerTop'),
+    pagerMessage: document.getElementById('pagerMessage'),
+
 
     // 公共按钮
     clearBtn: document.getElementById('clearBtn'),
@@ -223,6 +237,8 @@
     setupSettings();
     setupResultModal();
     setupPagination();
+    setupFloatingPager();
+    setupTableFileInput();
     setupLifecycleCleanup();
     // 初始添加 3 行表格
     addTableRow();
@@ -1316,6 +1332,7 @@
 
     el.pageJumpInput.max = totalPages;
     el.pageJumpInput.value = pg.currentPage;
+    if (typeof renderFloatingPager === 'function') renderFloatingPager();
   }
 
   // ====== 分页事件绑定（后端分页：每次切页都重新请求）======
@@ -1325,6 +1342,7 @@
       if (!size || size === state.pagination.pageSize) return;
       state.pagination.pageSize = size;
       state.pagination.currentPage = 1;
+      if (el.pagerSizeInput) el.pagerSizeInput.value = String(size);
       loadResultsPage({ keepResults: true });
     });
 
@@ -1358,6 +1376,7 @@
       } else {
         el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
+      if (typeof renderFloatingPager === 'function') renderFloatingPager();
     });
   }
 
@@ -1542,6 +1561,448 @@
         closeResultModal();
       }
     });
+  }
+
+  // ====== 悬浮分页条: 设置 / 渲染 / 灵敏度 ======
+  function setupFloatingPager() {
+    if (!el.resultPager) return;
+
+    // 监听每页大小切换
+    if (el.pagerSizeInput) {
+      el.pagerSizeInput.addEventListener('change', () => {
+        const size = parseInt(el.pagerSizeInput.value);
+        if (!size || size === state.pagination.pageSize) return;
+        state.pagination.pageSize = size;
+        state.pagination.currentPage = 1;
+        if (el.pageSizeSelect) el.pageSizeSelect.value = String(size);
+        loadResultsPage({ keepResults: true });
+      });
+    }
+
+    // 上一页 / 下一页
+    if (el.pagerPrev) {
+      el.pagerPrev.addEventListener('click', () => {
+        if (state.pagination.currentPage > 1) goToPage(state.pagination.currentPage - 1);
+      });
+    }
+    if (el.pagerNext) {
+      el.pagerNext.addEventListener('click', () => {
+        const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+        if (state.pagination.currentPage < totalPages) goToPage(state.pagination.currentPage + 1);
+      });
+    }
+
+    // 回顶
+    if (el.pagerTop) {
+      el.pagerTop.addEventListener('click', () => {
+        window.scrollTo({ top: el.resultSection.offsetTop - 20, behavior: 'smooth' });
+      });
+    }
+
+    // 键盘翻页：当焦点在结果区时
+    document.addEventListener('keydown', (e) => {
+      if (!el.resultSection || el.resultSection.style.display === 'none') return;
+      const tag = (e.target && e.target.tagName) || '';
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.key === 'ArrowLeft' && state.pagination.currentPage > 1) {
+        e.preventDefault();
+        goToPage(state.pagination.currentPage - 1);
+      } else if (e.key === 'ArrowRight') {
+        const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+        if (state.pagination.currentPage < totalPages) {
+          e.preventDefault();
+          goToPage(state.pagination.currentPage + 1);
+        }
+      } else if (e.key === 'Home') {
+        e.preventDefault();
+        goToPage(1);
+      } else if (e.key === 'End') {
+        const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+        e.preventDefault();
+        goToPage(totalPages);
+      }
+    });
+
+    // 滚动监听: 当 sentinel 离开视口顶部 → 悬浮; 接近视口底部 → 贴底
+    if (el.pagerSentinel && 'IntersectionObserver' in window) {
+      const observer = new IntersectionObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) return;
+        const inView = entry.isIntersecting;
+        if (inView) {
+          el.resultPager.classList.add('is-inline');
+          el.resultPager.removeAttribute('data-visible');
+        } else {
+          el.resultPager.classList.remove('is-inline');
+          el.resultPager.setAttribute('data-visible', 'true');
+        }
+      }, { rootMargin: '-80px 0px 0px 0px', threshold: 0 });
+      observer.observe(el.pagerSentinel);
+    } else {
+      // 不支持 IntersectionObserver → 始终悬浮
+      el.resultPager.setAttribute('data-visible', 'true');
+    }
+  }
+
+  function renderFloatingPager() {
+    if (!el.resultPager) return;
+    const pg = state.pagination;
+    const total = pg.totalItems;
+    const totalPages = Math.max(1, Math.ceil(total / pg.pageSize));
+
+    if (total === 0) {
+      el.resultPager.hidden = true;
+      el.resultPager.removeAttribute('data-visible');
+      el.resultPager.classList.remove('is-inline');
+      return;
+    }
+
+    el.resultPager.hidden = false;
+
+    // 更新 page-size select 与原 select 同步
+    if (el.pagerSizeInput && el.pagerSizeInput.value !== String(pg.pageSize)) {
+      el.pagerSizeInput.value = String(pg.pageSize);
+    }
+    if (el.pageSizeSelect && el.pageSizeSelect.value !== String(pg.pageSize)) {
+      el.pageSizeSelect.value = String(pg.pageSize);
+    }
+
+    // 信息文字
+    const startIdx = (pg.currentPage - 1) * pg.pageSize + 1;
+    const endIdx = Math.min(total, pg.currentPage * pg.pageSize);
+    el.pagerInfo.textContent = `第 ${startIdx}-${endIdx} 张 / 共 ${total} 张 · 第 ${pg.currentPage} / ${totalPages} 页`;
+
+    // 按钮可见性
+    el.pagerPrev.disabled = pg.currentPage <= 1;
+    el.pagerNext.disabled = pg.currentPage >= totalPages;
+
+    // 渲染页码
+    renderPagerPages(totalPages);
+
+    // 首次进入时根据 sentinel 是否在视口决定悬浮/贴底
+    if (el.pagerSentinel && 'IntersectionObserver' in window) {
+      const rect = el.pagerSentinel.getBoundingClientRect();
+      const inView = rect.top < window.innerHeight && rect.bottom > 0;
+      if (inView) {
+        el.resultPager.classList.add('is-inline');
+        el.resultPager.removeAttribute('data-visible');
+      } else {
+        el.resultPager.classList.remove('is-inline');
+        el.resultPager.setAttribute('data-visible', 'true');
+      }
+    } else {
+      el.resultPager.setAttribute('data-visible', 'true');
+    }
+  }
+
+  function renderPagerPages(totalPages) {
+    if (!el.pagerPages) return;
+    el.pagerPages.innerHTML = '';
+    const current = state.pagination.currentPage;
+    const pages = buildPageList(current, totalPages);
+    pages.forEach((p) => {
+      if (p === '...') {
+        const span = document.createElement('span');
+        span.className = 'pager-ellipsis';
+        span.textContent = '…';
+        el.pagerPages.appendChild(span);
+      } else {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'pager-item' + (p === current ? ' is-current' : '');
+        btn.textContent = String(p);
+        if (p === current) btn.disabled = true;
+        btn.addEventListener('click', () => goToPage(p));
+        el.pagerPages.appendChild(btn);
+      }
+    });
+  }
+
+  function buildPageList(current, total) {
+    if (total <= 7) {
+      const out = [];
+      for (let i = 1; i <= total; i++) out.push(i);
+      return out;
+    }
+    const out = [1];
+    if (current > 4) out.push('...');
+    const start = Math.max(2, current - 2);
+    const end = Math.min(total - 1, current + 2);
+    for (let i = start; i <= end; i++) out.push(i);
+    if (current < total - 3) out.push('...');
+    out.push(total);
+    return out;
+  }
+
+  function showPagerMessage(text, onRetry) {
+    if (!el.pagerMessage) return;
+    el.pagerMessage.innerHTML = '';
+    const span = document.createElement('span');
+    span.textContent = text;
+    el.pagerMessage.appendChild(span);
+    if (typeof onRetry === 'function') {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.textContent = '重试';
+      btn.addEventListener('click', () => {
+        el.pagerMessage.style.display = 'none';
+        onRetry();
+      });
+      el.pagerMessage.appendChild(btn);
+    }
+    el.pagerMessage.style.display = 'flex';
+    setTimeout(() => { if (el.pagerMessage) el.pagerMessage.style.display = 'none'; }, 6000);
+  }
+
+  // ====== Excel / CSV 表格上传 (spreadsheet-drop-zone) ======
+  function setupTableFileInput() {
+    if (!el.tableFileInput) return;
+
+    el.tableFileInput.addEventListener('change', (e) => {
+      const fl = Array.from(e.target.files || []);
+      handleTableFiles(fl);
+      el.tableFileInput.value = '';
+    });
+
+    // 拖拽
+    const dropZone = el.tableFileInput.closest('.spreadsheet-drop-zone');
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('drag-over');
+      });
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('drag-over');
+      });
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('drag-over');
+        const fl = Array.from(e.dataTransfer.files || []);
+        handleTableFiles(fl);
+      });
+    }
+  }
+
+  async function handleTableFiles(files) {
+    if (!files || files.length === 0) return;
+    if (!el.tableFileList) return;
+    el.tableFileList.style.display = 'flex';
+    for (const file of files) {
+      try {
+        const ext = (file.name.split('.').pop() || '').toLowerCase();
+        let urls = [];
+        if (ext === 'csv') urls = await parseCsvFile(file);
+        else if (ext === 'xlsx' || ext === 'xls') urls = await parseXlsxFile(file);
+        else throw new Error('不支持的文件类型: ' + ext);
+
+        appendTableFileRow(file.name, urls.length);
+        // 注入到 URL 输入框
+        if (el.urlTextarea) {
+          const existing = el.urlTextarea.value.trim();
+          el.urlTextarea.value = (existing ? existing + '\n' : '') + urls.join('\n');
+        }
+        // 同步触发 link 上传预览 (手动 broadcast input 事件)
+        if (el.urlTextarea) {
+          el.urlTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+      } catch (err) {
+        appendTableFileRow(file.name + ' (错误: ' + (err.message || '解析失败') + ')', 0);
+      }
+    }
+  }
+
+  function appendTableFileRow(name, count) {
+    if (!el.tableFileList) return;
+    const row = document.createElement('div');
+    row.className = 'table-file-row';
+    const nameEl = document.createElement('span');
+    nameEl.className = 'name';
+    nameEl.textContent = name;
+    const countEl = document.createElement('span');
+    countEl.className = 'count';
+    countEl.textContent = count > 0 ? `提取 ${count} 条链接` : '无有效链接';
+    row.appendChild(nameEl);
+    row.appendChild(countEl);
+    el.tableFileList.appendChild(row);
+  }
+
+  async function parseCsvFile(file) {
+    const text = await file.text();
+    const urls = [];
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0) return urls;
+    // 尝试找第一行的列名
+    const header = splitCsvLine(lines[0]).map((c) => c.trim().toLowerCase());
+    let urlCol = header.findIndex((h) => /url|link|image|图片|链接/.test(h));
+    let start = 0;
+    if (urlCol >= 0) start = 1;
+    else urlCol = 0; // 默认第一列
+    for (let i = start; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i]);
+      const v = (cells[urlCol] || '').trim();
+      if (/^https?:\/\//i.test(v)) urls.push(v);
+    }
+    return urls;
+  }
+
+  function splitCsvLine(line) {
+    const out = [];
+    let cur = '';
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === ',' && !inQ) {
+        out.push(cur); cur = '';
+      } else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  async function parseXlsxFile(file) {
+    // 纯前端 .xlsx 解析 (OOXML / sharedStrings.xml / sheet1.xml)
+    const buf = await file.arrayBuffer();
+    const zip = inflateZip(buf);
+    if (!zip) throw new Error('xlsx 解析失败: 无法解压缩');
+    const sharedStrings = parseSharedStrings(zip['xl/sharedStrings.xml'] || '');
+    const sheet1 = zip['xl/worksheets/sheet1.xml'] || '';
+    if (!sheet1) {
+      // 尝试 sheet 命名
+      for (const k of Object.keys(zip)) {
+        if (/^xl\/worksheets\/sheet\d+\.xml$/.test(k)) {
+          return extractRowsFromSheetXml(zip[k], sharedStrings);
+        }
+      }
+      throw new Error('xlsx 解析失败: 未找到 sheet');
+    }
+    return extractRowsFromSheetXml(sheet1, sharedStrings);
+  }
+
+  // 极简 zip 读取: 仅支持 STORE + DEFLATE, 处理 .xlsx 中央目录
+  function inflateZip(arrayBuffer) {
+    const u8 = new Uint8Array(arrayBuffer);
+    const dv = new DataView(arrayBuffer);
+    const files = {};
+    try {
+      const eocd = findEocd(u8);
+      if (eocd < 0) return null;
+      const totalEntries = dv.getUint16(eocd + 10, true);
+      const cdOffset = dv.getUint32(eocd + 16, true);
+      let p = cdOffset;
+      for (let i = 0; i < totalEntries; i++) {
+        if (dv.getUint32(p, true) !== 0x02014b50) return null;
+        const method = dv.getUint16(p + 10, true);
+        const compSize = dv.getUint32(p + 20, true);
+        const uncompSize = dv.getUint32(p + 24, true);
+        const nameLen = dv.getUint16(p + 28, true);
+        const extraLen = dv.getUint16(p + 30, true);
+        const commentLen = dv.getUint16(p + 32, true);
+        const localOffset = dv.getUint32(p + 42, true);
+        const name = new TextDecoder().decode(u8.subarray(p + 46, p + 46 + nameLen));
+        // 跳到 local header
+        const lh = localOffset;
+        if (dv.getUint32(lh, true) !== 0x04034b50) return null;
+        const lhNameLen = dv.getUint16(lh + 26, true);
+        const lhExtraLen = dv.getUint16(lh + 28, true);
+        const dataStart = lh + 30 + lhNameLen + lhExtraLen;
+        const dataEnd = dataStart + compSize;
+        const compData = u8.subarray(dataStart, dataEnd);
+        let data;
+        if (method === 0) {
+          data = compData;
+        } else if (method === 8) {
+          data = inflateRaw(compData);
+        } else {
+          return null;
+        }
+        files[name] = new TextDecoder('utf-8').decode(data);
+        p += 46 + nameLen + extraLen + commentLen;
+      }
+      return files;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function findEocd(u8) {
+    // 末尾搜 EOCD 签名 0x06054b50
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+      if (u8[i] === 0x50 && u8[i + 1] === 0x4b && u8[i + 2] === 0x05 && u8[i + 3] === 0x06) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // 极简 raw inflate (与 .xlsx 兼容, 不处理滑动窗口大小差异)
+  function inflateRaw(data) {
+    if (typeof window !== 'undefined' && window.DecompressionStream) {
+      const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('deflate'));
+      return new Response(stream).arrayBuffer().then((buf) => new Uint8Array(buf));
+    }
+    // fallback: pako 之类不在, 放弃
+    return null;
+  }
+
+  function parseSharedStrings(xml) {
+    const out = [];
+    const re = /<si[^>]*>([\s\S]*?)<\/si>/g;
+    let m;
+    while ((m = re.exec(xml)) !== null) {
+      const inner = m[1];
+      const tRe = /<t[^>]*>([\s\S]*?)<\/t>/g;
+      let s = '';
+      let mt;
+      while ((mt = tRe.exec(inner)) !== null) {
+        s += decodeXmlEntities(mt[1]);
+      }
+      out.push(s);
+    }
+    return out;
+  }
+
+  function extractRowsFromSheetXml(xml, sharedStrings) {
+    const rows = [];
+    const rowRe = /<row[^>]*>([\s\S]*?)<\/row>/g;
+    let rm;
+    while ((rm = rowRe.exec(xml)) !== null) {
+      const row = {};
+      const cellRe = /<c[^>]*r="([^"]+)"(?:[^>]*t="([^"]+)")?[^>]*>([\s\S]*?)<\/c>/g;
+      let cm;
+      while ((cm = cellRe.exec(rm[1])) !== null) {
+        const ref = cm[1];
+        const t = cm[2];
+        const col = ref.replace(/[0-9]/g, '');
+        const vMatch = /<v>([\s\S]*?)<\/v>/.exec(cm[3]);
+        if (!vMatch) continue;
+        const raw = decodeXmlEntities(vMatch[1]);
+        let val = raw;
+        if (t === 's') val = sharedStrings[parseInt(raw, 10)] || '';
+        row[col] = val;
+      }
+      rows.push(row);
+    }
+    // 表头
+    if (rows.length === 0) return [];
+    const header = rows[0];
+    const cols = Object.keys(header);
+    const norm = (s) => (s || '').toString().trim().toLowerCase();
+    let urlCol = cols.find((c) => /url|link|image|图片|链接/.test(norm(header[c])));
+    if (!urlCol) urlCol = cols[0];
+    const urls = [];
+    for (let i = 1; i < rows.length; i++) {
+      const r = rows[i];
+      const v = norm(r[urlCol]);
+      if (/^https?:\/\//i.test(v)) urls.push(urlCol ? r[urlCol].trim() : v);
+    }
+    return urls;
+  }
+
+  function decodeXmlEntities(s) {
+    return s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'");
   }
 
   function openResultModal(imageName, imageUrl, sortedItems, imageData) {
