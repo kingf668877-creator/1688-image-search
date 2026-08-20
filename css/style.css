@@ -2590,3 +2590,235 @@ a.product-shop:hover {
     justify-content: center;
   }
 }
+
+
+/* ============================================
+   悬浮分页条 (result-pager) 与 Excel 表格上传增强
+   20260820-unify-pager
+   ============================================ */
+
+/* 底部守门员: 用于 IntersectionObserver 判定分页条何时进入视口 */
+.pager-sentinel {
+  height: 1px;
+  width: 100%;
+}
+
+/* 悬浮分页条容器 */
+.result-pager {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  z-index: 90;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  pointer-events: none;
+  transition: bottom 0.18s ease;
+}
+.result-pager[data-visible="true"] { display: flex; }
+.result-pager.is-inline {
+  position: static;
+  transform: none;
+  margin: 16px auto 0;
+  pointer-events: auto;
+}
+
+/* 悬浮条主框 */
+.pager-inner {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(255, 106, 0, 0.25);
+  border-radius: 999px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.08);
+  backdrop-filter: blur(8px);
+  font-size: 13px;
+  color: #333;
+}
+.result-pager.is-inline .pager-inner {
+  border-radius: 12px;
+}
+
+.pager-arrow {
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 999px;
+  padding: 4px 12px;
+  cursor: pointer;
+  color: #444;
+  transition: all 0.16s ease;
+}
+.pager-arrow:hover:not(:disabled) {
+  border-color: #ff6a00;
+  color: #ff6a00;
+}
+.pager-arrow:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.pager-arrow.is-loading { opacity: 0.6; pointer-events: none; }
+
+.pager-info {
+  font-variant-numeric: tabular-nums;
+  color: #555;
+  font-weight: 500;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.pager-pages {
+  display: flex;
+  gap: 4px;
+}
+.pager-item {
+  min-width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  color: #555;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.pager-item:hover:not(:disabled):not(.pager-ellipsis) {
+  border-color: #ff6a00;
+  color: #ff6a00;
+}
+.pager-item.is-current {
+  background: #ff6a00;
+  color: #fff;
+  border-color: #ff6a00;
+}
+.pager-item:disabled { cursor: default; opacity: 0.45; }
+.pager-ellipsis { padding: 0 4px; color: #999; }
+
+.pager-size {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #555;
+}
+.pager-size select {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 2px 4px;
+  background: #fff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.pager-top {
+  background: #ff6a00;
+  color: #fff;
+  border: none;
+  border-radius: 999px;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  transition: background 0.16s ease;
+}
+.pager-top:hover { background: #e85a00; }
+
+.pager-message {
+  pointer-events: auto;
+  background: rgba(255, 235, 230, 0.95);
+  color: #c33;
+  border: 1px solid #f5b8a8;
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.pager-message.is-error { color: #c33; }
+.pager-message button {
+  background: transparent;
+  border: 1px solid #c33;
+  color: #c33;
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* Excel 表格上传区 */
+.spreadsheet-drop-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 26px 20px;
+  border: 2px dashed #ff6a00;
+  border-radius: 12px;
+  background: #fff8f0;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  text-align: center;
+  gap: 6px;
+}
+.spreadsheet-drop-zone:hover {
+  background: #fff1e0;
+  border-color: #e85a00;
+}
+.spreadsheet-drop-zone.drag-over {
+  background: #ffe9d6;
+  border-color: #d24a00;
+  transform: scale(1.01);
+}
+.spreadsheet-icon { font-size: 32px; }
+.spreadsheet-drop-zone strong {
+  color: #ff6a00;
+  font-size: 14px;
+}
+.spreadsheet-drop-zone span {
+  color: #888;
+  font-size: 12px;
+}
+
+.table-file-list {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid #eee;
+  border-radius: 8px;
+  background: #fafafa;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.table-file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  background: #fff;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.table-file-row .name {
+  flex: 1;
+  color: #333;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.table-file-row .count {
+  color: #ff6a00;
+  font-weight: 500;
+}
+
+@media (max-width: 640px) {
+  .pager-inner { gap: 6px; padding: 6px 10px; font-size: 12px; }
+  .pager-arrow { padding: 3px 8px; }
+}
