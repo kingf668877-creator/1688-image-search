@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>1688 图搜批量寻源 - 以图搜款找货源</title>
-<link rel="stylesheet" href="css/style.css?v=20260820-ozon-v3">
+<link rel="stylesheet" href="css/style.css?v=20260820-ozon-rollback">
 <link rel="icon" type="image/png" href="logo.png">
 </head>
 <body>
@@ -66,14 +66,14 @@
 
           <div class="upload-tabs" id="uploadTabs">
             <button class="upload-tab active" data-tab="link">🔗 图片链接批量上传</button>
-            <button class="upload-tab" data-tab="batch">🖼️ 图片批量上传</button>
+            <button class="upload-tab" data-tab="batch">🖼图片批量上传</button>
             <button class="upload-tab" data-tab="table">📋 表格批量上传</button>
           </div>
 
           <!-- 链接面板 (默认激活) -->
           <div class="upload-panel active" id="panel-link">
             <p class="panel-hint">每行粘贴一个图片 URL 地址，支持 http/https 链接，不限数量</p>
-            <textarea id="urlTextarea" rows="8" placeholder="https://example.com/img1.jpg
+            <textarea id="urlTextarea" rows="8" placeholder="https://example.com/img1.png
 https://example.com/img2.png
 https://example.com/img3.webp
 ..."></textarea>
@@ -137,7 +137,7 @@ https://example.com/img3.webp
                 <button class="btn btn-outline btn-sm" id="previewTableBtn" style="margin-left:8px">预览链接</button>
                 <button class="btn btn-danger btn-sm" id="clearTableBtn" style="margin-left:auto">🗑 移除文件</button>
               </div>
-              <textarea id="tableUrlTextarea" rows="6" placeholder="识别到的图片链接将显示在这里..." style="margin-top:8px;width:100%;border:1px solid #e0e0e6;border-radius:8px;padding:8px;font-size:13px;font-family:inherit;resize:vertical"></textarea>
+              <textarea id="tableUrlTextarea" rows="6" placeholder="识别到的图片链接将显示在这里..." style="margin-top:8px;width:100%;border:1px solid #e0e0e6;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'SFMono-Regular',Consolas,Menlo,monospace;resize:vertical"></textarea>
               <p class="panel-hint" style="margin-top:6px;font-size:12px;color:#a0a0b0">可手动编辑上方文本框中的链接，编辑后点击刷新按钮更新</p>
               <button class="btn btn-outline btn-sm" id="refreshTableUrlsBtn" style="margin-top:6px">🔄 刷新链接列表</button>
               <div class="url-preview" id="tablePreview" hidden="" style="margin-top:12px">
@@ -184,26 +184,10 @@ https://example.com/img3.webp
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             <div class="progress-text"><span id="progressCurrent">0</span> / <span id="progressTotal">0</span> · <span id="progressPercent">0%</span></div>
           </div>
-          <div class="progress-stage" id="progressStage" hidden="">
-            <div class="progress-stage-row">
-              <span class="stage-label">下载</span>
-              <div class="progress-bar stage-progress-bar"><div class="progress-fill download-progress-fill" id="downloadProgressFill"></div></div>
-              <span class="stage-value"><span id="downloadProgressText">0/0</span></span>
-            </div>
-            <div class="progress-stage-row">
-              <span class="stage-label">搜索</span>
-              <div class="progress-bar stage-progress-bar"><div class="progress-fill search-progress-fill" id="searchProgressFill"></div></div>
-              <span class="stage-value"><span id="searchProgressText">0/0</span></span>
-            </div>
-          </div>
           <div class="progress-detail">
             <div class="progress-detail-item"><span class="detail-label">已找到商品</span><span class="detail-value" id="foundProducts">0</span></div>
             <div class="progress-detail-item"><span class="detail-label">已用时间</span><span class="detail-value" id="elapsedTime">0s</span></div>
             <div class="progress-detail-item"><span class="detail-label">预计剩余</span><span class="detail-value" id="estimatedTime">-</span></div>
-          </div>
-          <div class="current-image-wrap" id="currentImageWrap" hidden="">
-            <img id="currentImage" alt="">
-            <span id="currentImageName"></span>
           </div>
           <div class="progress-tip">💡 搜索过程中请勿关闭页面，本地后端会驱动 1688 图像搜索接口</div>
         </div>
@@ -223,28 +207,9 @@ https://example.com/img3.webp
           </div>
         </div>
         <div class="stats-row" id="statsRow"></div>
-        <div class="pager-sentinel" id="pagerSentinel"></div>
-        <div class="result-pager" id="resultPager" hidden="">
-          <div class="pager-inner">
-            <button class="pager-arrow" id="pagerPrev" type="button">‹ 上一页</button>
-            <div class="pager-info" id="pagerInfo">第 1 / 1 页</div>
-            <div class="pager-pages" id="pagerPages"></div>
-            <button class="pager-arrow" id="pagerNext" type="button">下一页 ›</button>
-            <label class="pager-size">每页
-              <select id="pagerSizeInput">
-                <option value="10">10</option>
-                <option value="20" selected="">20</option>
-                <option value="50">50</option>
-              </select> 张
-            </label>
-            <button class="pager-top" id="pagerTop" type="button" title="回到顶部">↑</button>
-          </div>
-          <div class="pager-message" id="pagerMessage" style="display:none"></div>
-        </div>
-        <div class="result-list" id="resultList"></div>
 
-        <!-- 顶部工具栏式分页（保留旧版位置） -->
-        <div class="pagination-wrap" id="paginationWrap" style="display: none;">
+        <!-- 顶部工具栏式分页（1688 原生风格） -->
+        <div class="pagination-wrap" id="paginationWrap">
           <div class="pagination">
             <button class="btn btn-sm btn-ghost" id="pageFirst">首页</button>
             <button class="btn btn-sm btn-ghost" id="pagePrev">上一页</button>
@@ -261,6 +226,8 @@ https://example.com/img3.webp
             <span class="page-jump">跳转 <input type="number" id="pageJumpInput" min="1"> <button class="btn btn-sm btn-ghost" id="pageJumpBtn">Go</button></span>
           </div>
         </div>
+
+        <div class="result-list" id="resultList"></div>
       </section>
 
     </div>
@@ -332,6 +299,6 @@ https://example.com/img3.webp
   </div>
 
 <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="js/app.js?v=20260820-ozon-v3"></script>
+<script src="js/app.js?v=20260820-ozon-rollback"></script>
 </body>
 </html>
