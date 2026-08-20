@@ -594,7 +594,11 @@
   // ====== 开始搜索 ======
   async function startSearch() {
     if (getCurrentFileCount() === 0) {
-      alert('请先添加图片');
+      if (state.currentTab === 'table') {
+        alert('请先上传表格文件, 或在文本框中粘贴图片链接');
+      } else {
+        alert('请先添加图片');
+      }
       return;
     }
 
@@ -1643,7 +1647,7 @@
     }
     // textarea 实时更新计数
     if (el.tableLinksTextarea) {
-      const update = () => renderTableLinksMeta();
+      const update = () => { renderTableLinksMeta(); updateButtons(); };
       el.tableLinksTextarea.addEventListener('input', update);
       update();
     }
@@ -1663,6 +1667,7 @@
     el.tableFileList && (el.tableFileList.style.display = 'none');
     state.tableLinks = [];
     renderTableLinksMeta();
+    updateButtons();
   }
 
   function renderTableLinksMeta() {
@@ -1675,6 +1680,8 @@
     if (!files || files.length === 0) return;
     if (!el.tableFileList) return;
     el.tableFileList.style.display = 'flex';
+    // 预加载 SheetJS (如果还没加载)
+    await loadSheetJSFallback();
     for (const file of files) {
       try {
         const urls = await parseSpreadsheet(file);
@@ -1689,6 +1696,7 @@
         appendTableFileRow(file.name, 0, err.message || '解析失败');
       }
     }
+    updateButtons();
   }
 
   function appendTableFileRow(name, count, error) {
@@ -1716,6 +1724,7 @@
       if (el.tableLinksTextarea) {
         el.tableLinksTextarea.value = '';
         renderTableLinksMeta();
+        updateButtons();
       }
     });
     actions.appendChild(removeBtn);
@@ -1770,7 +1779,11 @@
 
   async function parseXlsxFile(file) {
     if (typeof XLSX === 'undefined') {
-      throw new Error('xlsx 解析库未加载，请检查网络');
+      // 尝试备用 CDN
+      await loadSheetJSFallback();
+    }
+    if (typeof XLSX === 'undefined') {
+      throw new Error('xlsx 解析库加载失败，请检查网络或刷新页面重试');
     }
     const buf = await file.arrayBuffer();
     const wb = XLSX.read(buf, { type: 'array' });
@@ -1790,6 +1803,34 @@
       if (/^https?:\/\//i.test(v)) urls.push(v);
     }
     return urls;
+  }
+
+  // ============ SheetJS 备用 CDN 加载 ============
+  let _sheetJsLoading = null;
+  function loadSheetJSFallback() {
+    if (typeof XLSX !== 'undefined') return Promise.resolve();
+    if (_sheetJsLoading) return _sheetJsLoading;
+    const sources = [
+      'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js',
+      'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js',
+      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+    ];
+    _sheetJsLoading = new Promise((resolve) => {
+      let i = 0;
+      function tryNext() {
+        if (i >= sources.length) { resolve(); return; }
+        const s = document.createElement('script');
+        s.src = sources[i++];
+        s.async = true;
+        s.onload = () => { if (typeof XLSX !== 'undefined') resolve(); else tryNext(); };
+        s.onerror = () => tryNext();
+        document.head.appendChild(s);
+      }
+      tryNext();
+      // 超时 6s
+      setTimeout(() => resolve(), 6000);
+    });
+    return _sheetJsLoading;
   }
 
   // 把 link 上传流程独立出来, 表格 Tab 复用
