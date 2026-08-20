@@ -1473,7 +1473,13 @@
       salesHtml = `<div class="mini-sales-row">${salesParts.join('')}</div>`;
     }
 
-    deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
+    const deliveryParts = [];
+    if (item.fenxiao_time_limit) {
+      deliveryParts.push(`<span class="mini-delivery-item" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
+    }
+    const deliveryHtml = deliveryParts.length > 0
+      ? `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`
+      : '';
 
     // 店铺 + 城市 + 开店年限
     let shopHtml = '';
@@ -1525,9 +1531,9 @@
       });
     }
 
-    }
     return card;
   }
+
   function setupResultModal() {
     el.resultModalOverlay.addEventListener('click', closeResultModal);
     el.resultModalClose.addEventListener('click', closeResultModal);
