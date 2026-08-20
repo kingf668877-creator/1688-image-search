@@ -1659,6 +1659,37 @@
   }
 
   // ====== 启动 ======
+  function setupHistory() {
+    if (el.refreshHistoryBtn) el.refreshHistoryBtn.addEventListener('click', renderHistory);
+    renderHistory();
+  }
+
+  function renderHistory() {
+    if (!el.historyList) return;
+    let raw;
+    try { raw = JSON.parse(localStorage.getItem('taskHistory') || '[]'); }
+    catch (e) { raw = []; }
+    if (!raw || raw.length === 0) {
+      el.historyList.innerHTML = '<div class="history-empty">暂无任务记录</div>';
+      return;
+    }
+    const items = raw.slice().reverse().slice(0, 20);
+    el.historyList.innerHTML = items.map(t => {
+      const status = t.status || 'completed';
+      const statusText = status === 'completed' ? '已完成' : (status === 'failed' ? '失败' : status);
+      const time = new Date(t.created_at || t.time || Date.now()).toLocaleString('zh-CN');
+      const safeId = String(t.task_id || '任务').replace(/&/g, '&amp;').replace(/</g, '&lt;');
+      return `<div class="history-item" data-task="${safeId}">
+        <span class="history-item-icon">${status === 'failed' ? '⚠' : '✓'}</span>
+        <div class="history-item-info">
+          <span class="history-item-title">${safeId} · ${t.total || 0} 张</span>
+          <span class="history-item-time">${time}</span>
+        </div>
+        <span class="history-item-status ${status}">${statusText}</span>
+      </div>`;
+    }).join('');
+  }
+
   function setupSettings() {
     if (el.settingsSave) el.settingsSave.addEventListener('click', saveSettings);
     if (el.settingsCancel) el.settingsCancel.addEventListener('click', closeSettings);
