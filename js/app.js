@@ -7,10 +7,11 @@
   'use strict';
 
   // ====== API 配置 ======
-  const DEFAULT_API_BASE = 'https://yidong.dianleida.net:22000';
+  const DEFAULT_API_BASE = 'https://substantially-removed-think-dublin.trycloudflare.com';
   const LEGACY_API_BASES = new Set([
     'https://corporate-thousand-cool-fixes.trycloudflare.com',
     'https://homework-jvc-terms-funky.trycloudflare.com',
+    'https://',
     'https://192.168.1.35:5443',
     'https://e216772.r5.cpolar.top',
     'https://suites-traditional-bay-pushing.trycloudflare.com',
@@ -109,12 +110,13 @@
     // 懒加载渲染计数
     fileVisibleCount: PREVIEW_INITIAL,
     urlVisibleCount: PREVIEW_INITIAL,
-    // 分页状态
+    // 分页状态（后端分页）
     pagination: {
       currentPage: 1,
       pageSize: 20,
       totalItems: 0,
       imageNames: [],
+      loading: false,
     },
   };
 
@@ -174,7 +176,7 @@
     resultList: document.getElementById('resultList'),
     exportJsonBtn: document.getElementById('exportJsonBtn'),
     newSearchBtn: document.getElementById('newSearchBtn'),
-    newSearchBtn: document.getElementById('newSearchBtn'),
+
     // 查看更多弹窗
     resultModal: document.getElementById('resultModal'),
     resultModalOverlay: document.getElementById('resultModalOverlay'),
@@ -210,35 +212,66 @@
     pageSizeSelect: document.getElementById('pageSizeSelect'),
   };
 
-    // ====== 初始化 ======
+  // ====== 初始化 ======
   function init() {
-    try { initCore(); } catch (err) { console.error(err); }
-  }
-
-  function initCore() {
+    setupTabs();
     setupDragAndDrop();
     setupFileInput();
     setupUrlUpload();
     setupTableUpload();
-    setupTabs();
     setupButtons();
     setupSettings();
     setupResultModal();
     setupPagination();
     setupLifecycleCleanup();
-    addTableRow(); addTableRow(); addTableRow();
+    // 初始添加 3 行表格
+    addTableRow();
+    addTableRow();
+    addTableRow();
     updateButtons();
   }
 
-  function setupTabs() {
-    if (!el.uploadTabs) return;
-    el.uploadTabs.querySelectorAll(".upload-tab").forEach(tab => {
-      tab.addEventListener("click", () => {
-        if (!tab) return;
-        switchTab(tab.dataset.tab);
-      });
+  // ====== Page lifecycle cleanup ======
+  function cleanupCurrentTask() {
+    const taskId = state.taskId;
+    if (!taskId || state.cleanupSentTaskId === taskId) return;
+
+    state.cleanupSentTaskId = taskId;
+    const url = api(`/api/tasks/${encodeURIComponent(taskId)}/cleanup`);
+    const body = JSON.stringify({ task_id: taskId });
+    const blob = new Blob([body], { type: 'application/json' });
+
+    try {
+      if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
+    } catch (error) {
+      console.warn('Task cleanup Beacon failed:', error);
+    }
+
+    fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive: true,
+    }).catch(error => console.warn('Task cleanup request failed:', error));
+  }
+
+  function setupLifecycleCleanup() {
+    window.addEventListener('pagehide', (event) => {
+      if (event.persisted === true) return;
+      cleanupCurrentTask();
     });
   }
+  // ====== Tab 切换 ======
+  function setupTabs() {
+    if (!el.uploadTabs) return;
+    el.uploadTabs.addEventListener('click', (e) => {
+      const tab = e.target.closest('.upload-tab');
+      if (!tab) return;
+      const tabName = tab.dataset.tab;
+      switchTab(tabName);
+    });
+  }
+
   function switchTab(tabName) {
     state.currentTab = tabName;
     // 切换按钮高亮
@@ -691,7 +724,6 @@
   }
 
   // ====== 开始搜索 ======
-  // ====== 开始搜索 ======
   async function startSearch() {
     if (getCurrentFileCount() === 0) {
       alert('请先添加图片');
@@ -710,8 +742,7 @@
         // 链接方式：流水线并行（边下载边搜索）
         const urls = parseUrls();
         const totalUrls = urls.length;
-        const CHUNK_SIZE = 10; // 单次请求最多 10 张 URL，云端 nginx body 限制更严
-
+        const CHUNK_SIZE = 50; // 每批50个URL
         const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
         let taskId = null;
         let totalUploaded = 0;
@@ -822,8 +853,8 @@
                   request_id: chunkRequestId,
                 }),
               }, {
-                attempts: 6,
-                timeoutMs: 300000,
+                attempts: 3,
+                timeoutMs: 180000,
                 stage: `第 ${chunkIdx + 1}/${totalChunks} 批图片上传`,
                 onRetry: (attempt, attempts) => {
                   updateProgress({
@@ -1152,18 +1183,45 @@
     stopElapsedTimer();
   }
 
-  // ====== 加载结果 ======
+  // ====== 加载结果（第一页）======
   async function loadResults() {
+    if (!state.taskId) return;
+    state.pagination.currentPage = 1;
+    state.pagination.totalItems = 0;
+    state.pagination.imageNames = [];
+    await loadResultsPage({ keepResults: false });
+  }
+
+  // ====== 加载某一页结果（后端分页）======
+  async function loadResultsPage({ keepResults = false } = {}) {
+    if (!state.taskId) return;
+    if (state.pagination.loading) return;
+    state.pagination.loading = true;
+    setPagerLoadingState(true);
+    const page = state.pagination.currentPage;
+    const size = state.pagination.pageSize;
+    const offset = (page - 1) * size;
     try {
-      const res = await fetch(api(`/api/results/${state.taskId}?limit=500&offset=0`));
+      const res = await fetch(api(`/api/results/${state.taskId}?offset=${offset}&limit=${size}`));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || '获取结果失败');
       state.results = data;
-      renderResults(data);
+      if (!keepResults) {
+        renderResults(data);
+      } else {
+        renderPaginatedResults(data);
+      }
     } catch (error) {
-      console.error('加载结果失败:', error);
+      console.error('加载结果页失败:', error);
       alert('加载结果失败: ' + error.message);
+    } finally {
+      state.pagination.loading = false;
+      setPagerLoadingState(false);
     }
+  }
+
+  function setPagerLoadingState(loading) {
+    if (el.paginationWrap) el.paginationWrap.classList.toggle('is-loading', !!loading);
   }
 
   // ====== 渲染结果（列表方式：一行一图） ======
@@ -1203,38 +1261,35 @@
       </div>
     `;
 
-    // 准备分页数据
-    const results = data.results || {};
-    const imageNames = Object.keys(results);
-    state.pagination.imageNames = imageNames;
-    state.pagination.totalItems = imageNames.length;
+    // 准备分页数据：以后端给的 total_images 为准
+    state.pagination.totalItems = data.total_images || 0;
     state.pagination.currentPage = 1;
-
-    // 渲染当前页
-    renderPaginatedResults(results);
+    // 渲染当前页（首屏这一页）
+    renderPaginatedResults(data);
 
     el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // ====== 分页渲染结果行 ======
-  function renderPaginatedResults(results) {
+  // ====== 分页渲染结果行（接受后端单页响应 data）======
+  function renderPaginatedResults(data) {
     const pg = state.pagination;
-    const { currentPage, pageSize, totalItems, imageNames } = pg;
+    const results = (data && data.results) || {};
+    const totalItems = data && typeof data.total_images === 'number' ? data.total_images : pg.totalItems;
+    pg.totalItems = totalItems;
+    const pageSize = pg.pageSize;
     const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-    if (currentPage > totalPages) pg.currentPage = totalPages;
+    if (pg.currentPage > totalPages) pg.currentPage = totalPages;
 
     const startIdx = (pg.currentPage - 1) * pageSize;
     const endIdx = Math.min(startIdx + pageSize, totalItems);
-    const pageItems = imageNames.slice(startIdx, endIdx);
 
     el.resultList.innerHTML = '';
-    pageItems.forEach((imageName) => {
+    Object.keys(results).forEach((imageName) => {
       const imageData = results[imageName];
       const row = createResultRow(imageName, imageData);
       el.resultList.appendChild(row);
     });
 
-    // 更新分页控件
     updatePaginationControls(totalPages, startIdx, endIdx);
   }
 
@@ -1263,51 +1318,46 @@
     el.pageJumpInput.value = pg.currentPage;
   }
 
-  // ====== 分页事件绑定 ======
+  // ====== 分页事件绑定（后端分页：每次切页都重新请求）======
   function setupPagination() {
     el.pageSizeSelect.addEventListener('change', () => {
-      state.pagination.pageSize = parseInt(el.pageSizeSelect.value);
+      const size = parseInt(el.pageSizeSelect.value);
+      if (!size || size === state.pagination.pageSize) return;
+      state.pagination.pageSize = size;
       state.pagination.currentPage = 1;
-      if (state.results) renderPaginatedResults(state.results.results || {});
+      loadResultsPage({ keepResults: true });
     });
 
-    el.pageFirst.addEventListener('click', () => {
-      state.pagination.currentPage = 1;
-      if (state.results) renderPaginatedResults(state.results.results || {});
-    });
-
-    el.pagePrev.addEventListener('click', () => {
-      if (state.pagination.currentPage > 1) {
-        state.pagination.currentPage--;
-        if (state.results) renderPaginatedResults(state.results.results || {});
-      }
-    });
-
-    el.pageNext.addEventListener('click', () => {
-      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
-      if (state.pagination.currentPage < totalPages) {
-        state.pagination.currentPage++;
-        if (state.results) renderPaginatedResults(state.results.results || {});
-      }
-    });
-
+    el.pageFirst.addEventListener('click', () => goToPage(1));
+    el.pagePrev.addEventListener('click', () => goToPage(state.pagination.currentPage - 1));
+    el.pageNext.addEventListener('click', () => goToPage(state.pagination.currentPage + 1));
     el.pageLast.addEventListener('click', () => {
       const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
-      state.pagination.currentPage = totalPages;
-      if (state.results) renderPaginatedResults(state.results.results || {});
+      goToPage(totalPages);
     });
 
     el.pageJumpBtn.addEventListener('click', () => {
       const page = parseInt(el.pageJumpInput.value);
-      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
-      if (page >= 1 && page <= totalPages) {
-        state.pagination.currentPage = page;
-        if (state.results) renderPaginatedResults(state.results.results || {});
-      }
+      if (page) goToPage(page);
     });
 
     el.pageJumpInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') el.pageJumpBtn.click();
+    });
+  }
+
+  function goToPage(page) {
+    const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
+    const target = Math.min(Math.max(1, page), totalPages);
+    if (target === state.pagination.currentPage) return;
+    state.pagination.currentPage = target;
+    loadResultsPage({ keepResults: true }).then(() => {
+      const firstRow = el.resultList.querySelector('.result-row');
+      if (firstRow) {
+        firstRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      } else {
+        el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
     });
   }
 
@@ -1423,16 +1473,7 @@
       salesHtml = `<div class="mini-sales-row">${salesParts.join('')}</div>`;
     }
 
-    // 运费 + 揽收时效
-    const deliveryParts = [];
-    const priceDescription = String(item.priceDescription || '').trim();
-    if (priceDescription) {
-      deliveryParts.push(`<span class="mini-delivery-item mini-freight">运费：${priceDescription}</span>`);
-    }
-    if (item.fenxiao_time_limit) {
-      deliveryParts.push(`<span class="mini-delivery-item mini-delivery-time" title="揽收时效">⏱${item.fenxiao_time_limit}</span>`);
-    }
-    const deliveryHtml = deliveryParts.length ? `<div class="mini-delivery-row">${deliveryParts.join(String())}</div>` : '';
+    deliveryHtml = `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`;
 
     // 店铺 + 城市 + 开店年限
     let shopHtml = '';
@@ -1484,6 +1525,7 @@
       });
     }
 
+    }
     return card;
   }
   function setupResultModal() {
@@ -1560,16 +1602,13 @@
       salesHtml = `<div class="product-sales">${salesParts.join('')}</div>`;
     }
 
-    // 运费 + 揽收时效
+    let deliveryHtml = '';
     const deliveryParts = [];
-    const priceDescription = String(item.priceDescription || '').trim();
-    if (priceDescription) {
-      deliveryParts.push(`<span class="delivery-item freight-text">运费：${priceDescription}</span>`);
-    }
+    // 拼接配送信息（揽收时效）
     if (item.fenxiao_time_limit) {
       deliveryParts.push(`<span class="delivery-item delivery-time" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
     }
-    const deliveryHtml = deliveryParts.length ? `<div class="product-delivery">${deliveryParts.join(String())}</div>` : '';
+    deliveryHtml = `<div class="product-delivery">${deliveryParts.join('')}</div>`;
 
     // 店铺信息：店名 + 城市 + 开店年限
     let shopHtml = '';
@@ -1767,29 +1806,14 @@
     return '¥' + num.toFixed(2);
   }
 
+  // 从URL中提取offerId
+  function extractOfferId(url) {
+    if (!url) return null;
+    const m = String(url).match(/offer\/(\d+)/);
+    return m ? m[1] : null;
+  }
 
   // ====== 启动 ======
   document.addEventListener('DOMContentLoaded', init);
 
 })();
-
-  async function stopCurrentTask() {
-    if (!state.taskId) return;
-    const tid = state.taskId;
-    try {
-      await fetchWithRetry(`/api/tasks/${encodeURIComponent(tid)}/cancel`, {method: 'POST'}, {attempts: 2, timeoutMs: 5000, stage: '取消任务'});
-    } catch (e) {
-      console.warn('取消任务失败', e);
-    }
-    try { stopPolling(); stopElapsedTimer(); } catch (e) {}
-    state.taskId = null;
-    state.results = null;
-    el.progressSection.style.display = 'none';
-    el.resultSection.style.display = 'none';
-    if (typeof el.searchBtn !== 'undefined' && el.searchBtn) {
-      el.searchBtn.disabled = false;
-      el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
-    }
-    alert(`任务 ${tid} 已停止并丢弃结果`);
-  }
-
