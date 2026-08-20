@@ -2753,72 +2753,158 @@ a.product-shop:hover {
 }
 
 /* Excel 表格上传区 */
+/* ============================================
+   表格批量上传（Excel/CSV） — 20260820-unify-spreadsheet
+   风格：淡灰底淡灰虚线框 + 简洁文件列表 + 链接 textarea
+   ============================================ */
+
 .spreadsheet-drop-zone {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 26px 20px;
-  border: 2px dashed #ff6a00;
+  padding: 36px 20px;
+  border: 2px dashed #cfd6e4;
   border-radius: 12px;
-  background: #fff8f0;
+  background: #f6f8fc;
   cursor: pointer;
   transition: all 0.16s ease;
   text-align: center;
-  gap: 6px;
+  gap: 8px;
+  color: #4a5568;
 }
 .spreadsheet-drop-zone:hover {
-  background: #fff1e0;
-  border-color: #e85a00;
+  background: #eef2f8;
+  border-color: #a6b1c2;
 }
 .spreadsheet-drop-zone.drag-over {
-  background: #ffe9d6;
-  border-color: #d24a00;
-  transform: scale(1.01);
+  background: #e6ecf6;
+  border-color: #2563eb;
+  color: #2563eb;
 }
-.spreadsheet-icon { font-size: 32px; }
+.spreadsheet-icon {
+  font-size: 36px;
+  color: #8492a6;
+  line-height: 1;
+}
 .spreadsheet-drop-zone strong {
-  color: #ff6a00;
-  font-size: 14px;
+  color: #2563eb;
+  font-size: 15px;
+  font-weight: 600;
 }
 .spreadsheet-drop-zone span {
-  color: #888;
+  color: #8492a6;
   font-size: 12px;
 }
 
+.spreadsheet-hint {
+  margin: 12px 0 8px;
+  font-size: 13px;
+  color: #6b7280;
+}
+
 .table-file-list {
-  margin-top: 12px;
-  padding: 12px;
-  border: 1px solid #eee;
-  border-radius: 8px;
-  background: #fafafa;
   display: flex;
   flex-direction: column;
   gap: 6px;
+  margin: 8px 0 14px;
 }
+
 .table-file-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 6px 10px;
-  background: #fff;
-  border: 1px solid #eee;
-  border-radius: 6px;
+  padding: 8px 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
   font-size: 13px;
+  color: #1f2937;
 }
 .table-file-row .name {
   flex: 1;
-  color: #333;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  font-weight: 500;
 }
 .table-file-row .count {
-  color: #ff6a00;
+  color: #2563eb;
+  font-weight: 500;
+  font-size: 12px;
+  padding: 2px 8px;
+  background: #eff6ff;
+  border-radius: 999px;
+}
+.table-file-row.is-error .count {
+  color: #dc2626;
+  background: #fef2f2;
+}
+.table-file-row .row-actions {
+  display: flex;
+  gap: 6px;
+}
+.table-file-row .row-actions button {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #475569;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.14s ease;
+}
+.table-file-row .row-actions button.preview-link:hover {
+  border-color: #2563eb;
+  color: #2563eb;
+}
+.table-file-row .row-actions button.remove-file {
+  background: #fef2f2;
+  color: #dc2626;
+  border-color: #fecaca;
+}
+.table-file-row .row-actions button.remove-file:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+}
+
+.spreadsheet-links-textarea {
+  width: 100%;
+  min-height: 110px;
+  resize: vertical;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1f2937;
+  background: #fff;
+  outline: none;
+  transition: border-color 0.14s ease, box-shadow 0.14s ease;
+  box-sizing: border-box;
+}
+.spreadsheet-links-textarea:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+.spreadsheet-links-meta {
+  font-size: 12px;
+  color: #6b7280;
+  margin-top: 6px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.spreadsheet-links-meta .count-badge {
+  background: #eff6ff;
+  color: #2563eb;
+  border-radius: 999px;
+  padding: 2px 8px;
   font-weight: 500;
 }
 
 @media (max-width: 640px) {
-  .pager-inner { gap: 6px; padding: 6px 10px; font-size: 12px; }
-  .pager-arrow { padding: 3px 8px; }
+  .spreadsheet-drop-zone { padding: 24px 12px; }
+  .spreadsheet-icon { font-size: 28px; }
 }
