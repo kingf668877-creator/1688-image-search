@@ -214,7 +214,7 @@
     resultModalThumb: document.getElementById('resultModalThumb'),
     resultModalTitle: document.getElementById('resultModalTitle'),
     resultModalSub: document.getElementById('resultModalSub'),
-    resultModalGrid: document.getElementById('resultModalGrid'),
+    resultModalGrid: document.getElementById('resultModalGrid') || document.getElementById('resultModalBody'),
 
     // 任务记录
     historyList: document.getElementById('historyList'),
@@ -880,6 +880,24 @@
       behavior: 'smooth',
       block: 'start',
     });
+  }
+
+  function formatPrice(price) {
+    if (price === undefined || price === null || price === '') return '面议';
+    const raw = String(price).trim();
+    if (!raw) return '面议';
+    if (/^¥|元|面议/.test(raw)) return raw;
+    const num = parseFloat(raw.replace(/[^\d.]/g, ''));
+    return Number.isFinite(num) ? `¥${num.toFixed(2)}` : raw;
+  }
+
+  function escapeHtml(value) {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   // ====== 实时计时器 ======
@@ -1705,7 +1723,7 @@
     if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettings);
     if (el.apiBaseInput && !el.apiBaseInput.value) el.apiBaseInput.value = getApiBase();
     if (!localStorage.getItem('apiBase')) {
-      localStorage.setItem('apiBase', window.location.origin || 'http://127.0.0.1:5000');
+      localStorage.setItem('apiBase', DEFAULT_API_BASE);
     }
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && el.settingsModal && el.settingsModal.hidden === false) {
@@ -1758,10 +1776,61 @@
   async function startBatchUpload(files) {
     const fd = new FormData();
     for (const f of files) fd.append('files', f);
-    const r = await fetch(api('/api/upload_files'), { method: 'POST', body: fd });
+    const r = await fetch(api('/api/upload'), { method: 'POST', body: fd });
     const j = await r.json();
     if (!r.ok) throw new Error(j.error || '上传失败');
     return j.task_id;
+  }
+
+  function createFullProductCard(item) {
+    const card = document.createElement('div');
+    card.className = 'product-card';
+    const img = item.image || '';
+    const title = item.title || '暂无标题';
+    const shopUrl = item.win_port_url || item.shop_url || '#';
+    const metaParts = [];
+    if (item.quantity_begin) metaParts.push(`<span class="meta-item">${escapeHtml(item.quantity_begin)}</span>`);
+    if (item.sale_quantity) metaParts.push(`<span class="meta-item">📦 ${escapeHtml(item.sale_quantity)}</span>`);
+    if (item.booked_count) metaParts.push(`<span class="meta-item">📋 ${escapeHtml(item.booked_count)}</span>`);
+    if (item.city) metaParts.push(`<span class="meta-item">📍 ${escapeHtml(item.city)}</span>`);
+    if (item.shop_year) metaParts.push(`<span class="meta-item">🏪 ${escapeHtml(item.shop_year)}</span>`);
+    if (item.fenxiao_time_limit) metaParts.push(`<span class="meta-item">⏱ ${escapeHtml(item.fenxiao_time_limit)}</span>`);
+    const sim = item.similarity !== undefined && item.similarity !== null ? Number(item.similarity).toFixed(2) : '';
+    card.innerHTML = `
+      <div class="product-img">
+        ${sim ? `<div class="similarity-badge" style="background:#ff6a00;">${sim}</div>` : ''}
+        ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(title)}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">` : '<div class="mini-img-placeholder">无图</div>'}
+      </div>
+      <div class="product-body">
+        <a class="product-title" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">${escapeHtml(title)}</a>
+        <div class="product-price-row">
+          <span class="price-text">${formatPrice(item.price)}</span>
+          ${item.price_description ? `<span class="product-moq">${escapeHtml(item.price_description)}</span>` : ''}
+        </div>
+        ${metaParts.length ? `<div class="product-meta">${metaParts.join('')}</div>` : ''}
+        ${item.shop ? `<div class="product-shop-wrapper"><a class="product-shop" href="${escapeHtml(shopUrl)}" target="_blank" rel="noopener">${escapeHtml(item.shop)}</a></div>` : ''}
+      </div>
+    `;
+    return card;
+  }
+
+  function openResultModal(imageName, imageUrl, items, imageData) {
+    if (!el.resultModal || !el.resultModalGrid) return;
+    if (el.resultModalThumb) el.resultModalThumb.src = imageUrl || '';
+    if (el.resultModalTitle) el.resultModalTitle.textContent = imageName || '搜索结果';
+    const list = Array.isArray(items) ? items : ((imageData && imageData.results) || []);
+    if (el.resultModalSub) {
+      const totalSeconds = Number(imageData?.total_seconds || imageData?.search_time || imageData?.search_seconds || 0);
+      el.resultModalSub.textContent = `共 ${list.length} 个结果${totalSeconds ? ' · 总计 ' + totalSeconds.toFixed(1) + 's' : ''}`;
+    }
+    el.resultModalGrid.innerHTML = '';
+    const grid = document.createElement('div');
+    grid.className = 'product-grid';
+    list.forEach(item => grid.appendChild(createFullProductCard(item)));
+    el.resultModalGrid.appendChild(grid);
+    el.resultModal.hidden = false;
+    el.resultModal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
   }
 
   // ====== 启动 ======
