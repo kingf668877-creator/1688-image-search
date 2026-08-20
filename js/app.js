@@ -388,7 +388,7 @@
       return;
     }
     el.fileList.style.display = 'block';
-    el.fileCount.textContent = `${state.files.length} 张`;
+    if (el.fileCount) el.fileCount.textContent = `${state.files.length} 张`;
     el.fileGrid.innerHTML = '';
 
     // 懒加载：只渲染前 fileVisibleCount 个
@@ -484,7 +484,7 @@
       return;
     }
     el.urlPreview.style.display = 'block';
-    el.urlCount.textContent = `${urls.length} 条`;
+    if (el.urlCount) el.urlCount.textContent = `${urls.length} 条`;
     el.urlGrid.innerHTML = '';
     state.urlVisibleCount = PREVIEW_INITIAL;
 
@@ -705,7 +705,7 @@
         // 显示上传接口耗时（第一批完成，搜索已启动）
         const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
         el.uploadTiming.style.display = 'flex';
-        el.uploadTimingValue.textContent = `${uploadDuration} 秒（第一批已启动搜索）`;
+        if (el.uploadTimingValue) el.uploadTimingValue.textContent = `${uploadDuration} 秒（第一批已启动搜索）`;
 
         // 显示进度并开始轮询
         showProgress();
@@ -829,7 +829,7 @@
         // 显示上传接口耗时
         const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
         el.uploadTiming.style.display = 'flex';
-        el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
+        if (el.uploadTimingValue) el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
 
         state.taskId = uploadData.task_id;
         state.cleanupSentTaskId = null;
@@ -873,8 +873,8 @@
     // 重置计时器状态
     state.searchStartedAt = null;
     stopElapsedTimer();
-    el.elapsedTime.textContent = '00:00';
-    el.estimatedTime.textContent = '-';
+    if (el.elapsedTime) el.elapsedTime.textContent = '00:00';
+    if (el.estimatedTime) el.estimatedTime.textContent = '-';
     el.imageStatusSection && (el.imageStatusSection.style.display = 'none');
     document.getElementById('upload-section').scrollIntoView({
       behavior: 'smooth',
@@ -905,13 +905,13 @@
 
   function updateElapsedDisplay() {
     if (!state.searchStartedAt) {
-      el.elapsedTime.textContent = '00:00';
-      el.estimatedTime.textContent = '-';
+      if (el.elapsedTime) el.elapsedTime.textContent = '00:00';
+      if (el.estimatedTime) el.estimatedTime.textContent = '-';
       return;
     }
     const startMs = new Date(state.searchStartedAt).getTime();
     const elapsedSec = (Date.now() - startMs) / 1000;
-    el.elapsedTime.textContent = formatDuration(elapsedSec);
+    if (el.elapsedTime) el.elapsedTime.textContent = formatDuration(elapsedSec);
 
     // 预估剩余时间
     const searched = parseInt(el.progressCurrent.textContent) || 0;
@@ -919,11 +919,11 @@
     if (searched > 0 && total > 0 && searched < total) {
       const avgPerImage = elapsedSec / searched;
       const remaining = (total - searched) * avgPerImage;
-      el.estimatedTime.textContent = '约 ' + formatDuration(remaining);
+      if (el.estimatedTime) el.estimatedTime.textContent = '约 ' + formatDuration(remaining);
     } else if (searched >= total && total > 0) {
-      el.estimatedTime.textContent = '即将完成';
+      if (el.estimatedTime) el.estimatedTime.textContent = '即将完成';
     } else {
-      el.estimatedTime.textContent = '-';
+      if (el.estimatedTime) el.estimatedTime.textContent = '-';
     }
   }
 
@@ -938,7 +938,7 @@
     const completedCount = imageStatuses.filter(s =>
       s.status === 'completed' || s.status === 'no_results'
     ).length;
-    el.imageStatusSummary.textContent = `${completedCount}/${imageStatuses.length} 已完成`;
+    if (el.imageStatusSummary) el.imageStatusSummary.textContent = `${completedCount}/${imageStatuses.length} 已完成`;
 
     // 确定当前正在搜索的图片（第一个pending的算作searching）
     const firstPendingIdx = imageStatuses.findIndex(s => s.status === 'pending');
@@ -986,7 +986,7 @@
       'completed': '已完成',
       'failed': '失败',
     };
-    el.progressStatus.textContent = statusMap[data.status] || data.status;
+    if (el.progressStatus) el.progressStatus.textContent = statusMap[data.status] || data.status;
 
     // 记录搜索开始时间（用于实时计时）
     if (data.search_started_at && !state.searchStartedAt) {
@@ -1006,29 +1006,29 @@
 
       // 主进度条显示搜索进度
       el.progressFill.style.width = searchPercent + '%';
-      el.progressCurrent.textContent = searched;
-      el.progressTotal.textContent = total;
-      el.progressPercent.textContent = searchPercent + '%';
+      if (el.progressCurrent) el.progressCurrent.textContent = searched;
+      if (el.progressTotal) el.progressTotal.textContent = total;
+      if (el.progressPercent) el.progressPercent.textContent = searchPercent + '%';
 
       // 在状态文字中显示下载进度
-      el.progressStatus.textContent = `边下载边搜索中 · 下载 ${downloaded}/${total} · 搜索 ${searched}/${total}`;
+      if (el.progressStatus) el.progressStatus.textContent = `边下载边搜索中 · 下载 ${downloaded}/${total} · 搜索 ${searched}/${total}`;
     } else {
       // 普通模式
       const current = data.current || 0;
       const percent = total > 0 ? Math.round((current / total) * 100) : 0;
 
       el.progressFill.style.width = percent + '%';
-      el.progressCurrent.textContent = current;
-      el.progressTotal.textContent = total;
-      el.progressPercent.textContent = percent + '%';
+      if (el.progressCurrent) el.progressCurrent.textContent = current;
+      if (el.progressTotal) el.progressTotal.textContent = total;
+      if (el.progressPercent) el.progressPercent.textContent = percent + '%';
     }
 
     if (data.message) {
       const match = data.message.match(/正在搜索: (.+?) \(/);
-      el.currentImage.textContent = match ? match[1] : data.message;
+      if (el.currentImage) el.currentImage.textContent = match ? match[1] : data.message;
     }
     if (data.results_count !== undefined) {
-      el.foundProducts.textContent = data.results_count;
+      if (el.foundProducts) el.foundProducts.textContent = data.results_count;
     }
 
     // 渲染每张图片处理状态列表
@@ -1139,7 +1139,7 @@
     const totalProducts = data.total_products || 0;
     const searchDuration = data.search_duration || 0;
 
-    el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
+    if (el.resultSubtitle) el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
 
     // 格式化总耗时（秒和分钟）
     const durationSec = searchDuration.toFixed(2);
@@ -1210,9 +1210,9 @@
     }
 
     el.paginationWrap.style.display = 'flex';
-    el.pageCurrentNum.textContent = pg.currentPage;
-    el.pageTotalNum.textContent = totalPages;
-    el.paginationInfo.textContent = `第 ${startIdx + 1}-${endIdx} 条，共 ${total} 条`;
+    if (el.pageCurrentNum) el.pageCurrentNum.textContent = pg.currentPage;
+    if (el.pageTotalNum) el.pageTotalNum.textContent = totalPages;
+    if (el.paginationInfo) el.paginationInfo.textContent = `第 ${startIdx + 1}-${endIdx} 条，共 ${total} 条`;
 
     // 按钮状态
     el.pageFirst.disabled = pg.currentPage <= 1;
@@ -1448,7 +1448,7 @@
     el.resultModalOverlay.addEventListener('click', closeResultModal);
     el.resultModalClose.addEventListener('click', closeResultModal);
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && el.resultModal.style.display !== 'none') {
+      if (e.key === 'Escape' && el.resultModal && el.resultModal.style.display !== 'none') {
         closeResultModal();
       }
     });
@@ -1480,7 +1480,7 @@
       const update = () => {
         if (el.tableUrlCount) {
           const n = (el.tableUrlTextarea.value.match(/^https?:\/\//gmi) || []).length;
-          el.tableUrlCount.textContent = n + ' 条链接';
+          if (el.tableUrlCount) el.tableUrlCount.textContent = n + ' 条链接';
         }
         updateButtons();
       };
