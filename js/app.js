@@ -1659,6 +1659,13 @@
   }
 
   // ====== 启动 ======
+  function closeResultModal() {
+    if (!el.resultModal) return;
+    el.resultModal.hidden = true;
+    el.resultModal.style.display = 'none';
+    document.body.style.overflow = '';
+  }
+
   function setupHistory() {
     if (el.refreshHistoryBtn) el.refreshHistoryBtn.addEventListener('click', renderHistory);
     renderHistory();
