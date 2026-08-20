@@ -1452,4 +1452,11 @@
   }
 
   // ====== Excel / CSV 表格上传 (spreadsheet-drop-zone) ======
+
+  // ====== 启动 ======
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', init);
+  } else {
+    init();
+  }
 })();
