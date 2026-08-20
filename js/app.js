@@ -1659,6 +1659,74 @@
   }
 
   // ====== 启动 ======
+  function setupSettings() {
+    if (el.settingsSave) el.settingsSave.addEventListener('click', saveSettings);
+    if (el.settingsCancel) el.settingsCancel.addEventListener('click', closeSettings);
+    if (el.settingsClose) el.settingsClose.addEventListener('click', closeSettings);
+    if (el.settingsOverlay) el.settingsOverlay.addEventListener('click', closeSettings);
+    if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettings);
+    if (el.apiBaseInput && !el.apiBaseInput.value) el.apiBaseInput.value = getApiBase();
+    if (!localStorage.getItem('apiBase')) {
+      localStorage.setItem('apiBase', window.location.origin || 'http://127.0.0.1:5000');
+    }
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && el.settingsModal && el.settingsModal.hidden === false) {
+        closeSettings();
+      }
+    });
+  }
+
+  function openSettings() {
+    if (!el.settingsModal) return;
+    el.apiBaseInput.value = getApiBase();
+    el.settingsModal.hidden = false;
+    el.settingsModal.style.display = 'flex';
+    checkConnection();
+  }
+
+  function closeSettings() {
+    if (!el.settingsModal) return;
+    el.settingsModal.style.display = 'none';
+    el.settingsModal.hidden = true;
+  }
+
+  function saveSettings() {
+    const v = (el.apiBaseInput && el.apiBaseInput.value || '').trim();
+    if (v) localStorage.setItem('apiBase', v);
+    closeSettings();
+    if (typeof alert === 'function') alert('设置已保存');
+  }
+
+  // ====== 启动上传 ======
+  async function startLinkUpload(urls) {
+    if (!urls || urls.length === 0) return;
+    const CHUNK = 50;
+    const chunks = [];
+    for (let i = 0; i < urls.length; i += CHUNK) chunks.push(urls.slice(i, i + CHUNK));
+    let taskId = null;
+    for (let i = 0; i < chunks.length; i++) {
+      const r = await fetch(api('/api/upload_urls'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: chunks[i], offset: i * CHUNK }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || '上传失败');
+      taskId = j.task_id || taskId;
+    }
+    return taskId;
+  }
+
+  async function startBatchUpload(files) {
+    const fd = new FormData();
+    for (const f of files) fd.append('files', f);
+    const r = await fetch(api('/api/upload_files'), { method: 'POST', body: fd });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || '上传失败');
+    return j.task_id;
+  }
+
+  // ====== 启动 ======
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {
