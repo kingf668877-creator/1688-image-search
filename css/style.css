@@ -1436,6 +1436,8 @@ img {
   align-items: center;
   justify-content: center;
 }
+.settings-modal[hidden] { display: none !important; }
+
 
 .settings-overlay {
   position: absolute;
@@ -2240,6 +2242,8 @@ img {
   align-items: center;
   justify-content: center;
 }
+.result-modal[hidden] { display: none !important; }
+
 
 .result-modal-overlay {
   position: absolute;
