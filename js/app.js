@@ -144,12 +144,17 @@
     urlCount: document.getElementById('urlCount'),
     urlGrid: document.getElementById('urlGrid'),
 
-    // 表格上传
-    tableLinksTextarea: document.getElementById('tableLinksTextarea'),
-    tableLinksMeta: document.getElementById('tableLinksMeta'),
-    // Excel 表格上传 (与原 table 上传并存)
+    // 表格上传 (ozon 风格)
     tableFileInput: document.getElementById('tableFileInput'),
-    tableFileList: document.getElementById('tableFileList'),
+    tableFileInfo: document.getElementById('tableFileInfo'),
+    tableFileName: document.getElementById('tableFileName'),
+    tableUrlCount: document.getElementById('tableUrlCount'),
+    previewTableBtn: document.getElementById('previewTableBtn'),
+    clearTableBtn: document.getElementById('clearTableBtn'),
+    tableUrlTextarea: document.getElementById('tableUrlTextarea'),
+    refreshTableUrlsBtn: document.getElementById('refreshTableUrlsBtn'),
+    tablePreview: document.getElementById('tablePreview'),
+    tableGrid: document.getElementById('tableGrid'),
     // 悬浮分页条
     resultPager: document.getElementById('resultPager'),
     pagerSentinel: document.getElementById('pagerSentinel'),
@@ -166,6 +171,9 @@
     clearBtn: document.getElementById('clearBtn'),
     searchBtn: document.getElementById('searchBtn'),
 
+    // API notice
+    apiNotice: document.getElementById('apiNotice'),
+    noticeClose: document.getElementById('noticeClose'),
     // 进度
     progressSection: document.getElementById('progress-section'),
     progressStatus: document.getElementById('progressStatus'),
@@ -180,6 +188,16 @@
     imageStatusSection: document.getElementById('imageStatusSection'),
     imageStatusSummary: document.getElementById('imageStatusSummary'),
     imageStatusList: document.getElementById('imageStatusList'),
+    cancelBtn: document.getElementById('cancelBtn'),
+    exportExcelBtn: document.getElementById('exportExcelBtn'),
+    // 进度 stage
+    progressStage: document.getElementById('progressStage'),
+    downloadProgressFill: document.getElementById('downloadProgressFill'),
+    searchProgressFill: document.getElementById('searchProgressFill'),
+    downloadProgressText: document.getElementById('downloadProgressText'),
+    searchProgressText: document.getElementById('searchProgressText'),
+    currentImageWrap: document.getElementById('currentImageWrap'),
+    currentImageName: document.getElementById('currentImageName'),
 
     // 结果
     resultSection: document.getElementById('result-section'),
@@ -198,6 +216,10 @@
     resultModalSub: document.getElementById('resultModalSub'),
     resultModalGrid: document.getElementById('resultModalGrid'),
 
+    // 任务记录
+    historyList: document.getElementById('historyList'),
+    historyEmpty: document.getElementById('historyEmpty'),
+    refreshHistoryBtn: document.getElementById('refreshHistoryBtn'),
     // 设置
     settingsBtn: document.getElementById('settingsBtn'),
     settingsModal: document.getElementById('settingsModal'),
@@ -233,6 +255,7 @@
     setupTableLinksInput();
     setupButtons();
     setupSettings();
+    setupHistory();
     setupResultModal();
     setupPagination();
     setupFloatingPager();
@@ -1629,73 +1652,109 @@
       handleTableFiles(fl);
       el.tableFileInput.value = '';
     });
-    // 拖拽
-    const dropZone = el.tableFileInput.closest('.spreadsheet-drop-zone');
+    // 拖拽 (ozon: 拖拽 .drop-zone)
+    const dropZone = el.tableFileInput.closest('.drop-zone');
     if (dropZone) {
       dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
-        dropZone.classList.add('drag-over');
+        dropZone.classList.add('dragover');
       });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
       dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
-        dropZone.classList.remove('drag-over');
+        dropZone.classList.remove('dragover');
         const fl = Array.from(e.dataTransfer.files || []);
         handleTableFiles(fl);
       });
     }
     // textarea 实时更新计数
-    if (el.tableLinksTextarea) {
-      const update = () => { renderTableLinksMeta(); updateButtons(); };
-      el.tableLinksTextarea.addEventListener('input', update);
-      update();
+    if (el.tableUrlTextarea) {
+      const update = () => {
+        if (el.tableUrlCount) {
+          const n = (el.tableUrlTextarea.value.match(/^https?:\/\//gmi) || []).length;
+          el.tableUrlCount.textContent = n + ' 条链接';
+        }
+        updateButtons();
+      };
+      el.tableUrlTextarea.addEventListener('input', update);
+    }
+    // 预览链接按钮
+    if (el.previewTableBtn) {
+      el.previewTableBtn.addEventListener('click', () => {
+        const urls = parseTableLinks();
+        renderTablePreview(urls);
+      });
+    }
+    // 刷新链接列表按钮 (从 textarea 重读)
+    if (el.refreshTableUrlsBtn) {
+      el.refreshTableUrlsBtn.addEventListener('click', () => {
+        const urls = parseTableLinks();
+        state.tableLinks = urls;
+        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
+        renderTablePreview(urls);
+        updateButtons();
+      });
+    }
+    // 移除文件按钮
+    if (el.clearTableBtn) {
+      el.clearTableBtn.addEventListener('click', () => {
+        state.tableLinks = [];
+        if (el.tableFileInfo) el.tableFileInfo.hidden = true;
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
+        if (el.tablePreview) el.tablePreview.hidden = true;
+        if (el.tableGrid) el.tableGrid.innerHTML = '';
+        updateButtons();
+      });
     }
   }
 
   function parseTableLinks() {
-    if (!el.tableLinksTextarea) return [];
-    return el.tableLinksTextarea.value
+    if (!el.tableUrlTextarea) return [];
+    return el.tableUrlTextarea.value
       .split(/\r?\n/)
       .map(s => s.trim())
       .filter(s => /^https?:\/\//i.test(s));
   }
 
-  function clearTableLinks() {
-    if (el.tableLinksTextarea) el.tableLinksTextarea.value = '';
-    if (el.tableFileList) el.tableFileList.innerHTML = '';
-    el.tableFileList && (el.tableFileList.style.display = 'none');
-    state.tableLinks = [];
-    renderTableLinksMeta();
-    updateButtons();
-  }
-
-  function renderTableLinksMeta() {
-    if (!el.tableLinksMeta) return;
-    const urls = parseTableLinks();
-    el.tableLinksMeta.textContent = `${urls.length} 条链接`;
-  }
-
   async function handleTableFiles(files) {
     if (!files || files.length === 0) return;
-    if (!el.tableFileList) return;
-    el.tableFileList.style.display = 'flex';
     // 预加载 SheetJS (如果还没加载)
     await loadSheetJSFallback();
     for (const file of files) {
       try {
         const urls = await parseSpreadsheet(file);
         state.tableLinks = urls;
-        appendTableFileRow(file.name, urls.length, null);
-        // 填入 textarea
-        if (el.tableLinksTextarea) {
-          el.tableLinksTextarea.value = urls.join('\n');
-          renderTableLinksMeta();
-        }
+        // ozon 风格: 显示 table-file-info 块
+        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
+        if (el.tableFileName) el.tableFileName.textContent = file.name;
+        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = urls.join('\n');
+        renderTablePreview(urls);
       } catch (err) {
-        appendTableFileRow(file.name, 0, err.message || '解析失败');
+        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
+        if (el.tableFileName) el.tableFileName.textContent = file.name + ' (错误)';
+        if (el.tableUrlCount) el.tableUrlCount.textContent = '解析失败: ' + (err.message || '');
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
       }
     }
     updateButtons();
+  }
+
+  function renderTablePreview(urls) {
+    if (!el.tableGrid || !el.tablePreview) return;
+    if (!urls || urls.length === 0) {
+      el.tablePreview.hidden = true;
+      el.tableGrid.innerHTML = '';
+      return;
+    }
+    el.tablePreview.hidden = false;
+    el.tableGrid.innerHTML = urls.slice(0, 60).map(url => {
+      const safe = String(url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return `<div class="file-grid-item">
+        <img src="${safe}" loading="lazy" onerror="this.style.opacity=0.3" alt="">
+        <div class="file-grid-name">${safe.slice(0, 40)}${safe.length > 40 ? '…' : ''}</div>
+      </div>`;
+    }).join('');
   }
 
   function appendTableFileRow(name, count, error) {
@@ -2292,10 +2351,30 @@
     el.settingsSave.addEventListener('click', saveSettings);
 
     const apiNotice = document.getElementById('apiNotice');
+    const noticeClose2 = document.getElementById('noticeClose');
+    if (noticeClose2 && apiNotice) {
+      noticeClose2.addEventListener('click', (e) => {
+        e.stopPropagation();
+        apiNotice.style.display = 'none';
+      });
+    }
+    // 同步默认 apiBase 到 input
+    if (el.apiBaseInput && !el.apiBaseInput.value) {
+      el.apiBaseInput.value = getApiBase();
+    }
+    const noticeClose = document.getElementById('noticeClose');
+    if (noticeClose && apiNotice) {
+      noticeClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        apiNotice.style.display = 'none';
+      });
+    }
+    // apiNotice 整体点击仍然进入设置
     if (apiNotice) apiNotice.addEventListener('click', openSettings);
 
-    if (!getApiBase()) {
-      setTimeout(openSettings, 500);
+    // 默认提供本地后端地址, 不再自动弹设置框
+    if (!localStorage.getItem('apiBase')) {
+      localStorage.setItem('apiBase', window.location.origin || 'http://127.0.0.1:5000');
     }
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && el.settingsModal.style.display !== 'none') {
