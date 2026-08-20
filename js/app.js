@@ -230,13 +230,12 @@
     setupDragAndDrop();
     setupFileInput();
     setupUrlUpload();
-    setupTableUpload();
+    setupTableLinksInput();
     setupButtons();
     setupSettings();
     setupResultModal();
     setupPagination();
     setupFloatingPager();
-    setupTableFileInput();
     setupLifecycleCleanup();
     updateButtons();
   }
