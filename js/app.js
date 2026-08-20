@@ -2191,11 +2191,13 @@
       el.resultModalGrid.appendChild(createFullProductCard(item));
     });
 
+    el.resultModal.hidden = false;
     el.resultModal.style.display = 'flex';
     document.body.style.overflow = 'hidden';
   }
 
   function closeResultModal() {
+    el.resultModal.hidden = true;
     el.resultModal.style.display = 'none';
     document.body.style.overflow = '';
   }
@@ -2424,12 +2426,14 @@
     if (hint) {
       hint.innerHTML = `默认公网后端：<br><code>${DEFAULT_API_BASE}</code><br>网页首次打开会自动使用该地址，无需手动设置。`;
     }
+    el.settingsModal.hidden = false;
     el.settingsModal.style.display = 'flex';
     checkConnection();
   }
 
   function closeSettings() {
     el.settingsModal.style.display = 'none';
+    el.settingsModal.hidden = true;
   }
 
   function saveSettings() {
