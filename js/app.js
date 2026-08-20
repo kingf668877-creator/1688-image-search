@@ -1452,6 +1452,110 @@
   }
 
   // ====== Excel / CSV 表格上传 (spreadsheet-drop-zone) ======
+  function setupTableLinksInput() {
+    if (!el.tableFileInput) return;
+    el.tableFileInput.addEventListener('change', (e) => {
+      const fl = Array.from(e.target.files || []);
+      handleTableFiles(fl);
+      el.tableFileInput.value = '';
+    });
+    const dropZone = el.tableFileInput.closest('.drop-zone');
+    if (dropZone) {
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('dragover');
+      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('dragover');
+        const fl = Array.from(e.dataTransfer.files || []);
+        handleTableFiles(fl);
+      });
+    }
+    if (el.tableUrlTextarea) {
+      const update = () => {
+        if (el.tableUrlCount) {
+          const n = (el.tableUrlTextarea.value.match(/^https?:\/\//gmi) || []).length;
+          el.tableUrlCount.textContent = n + ' 条链接';
+        }
+        updateButtons();
+      };
+      el.tableUrlTextarea.addEventListener('input', update);
+    }
+    if (el.previewTableBtn) {
+      el.previewTableBtn.addEventListener('click', () => {
+        const urls = parseTableLinks();
+        renderTablePreview(urls);
+      });
+    }
+    if (el.refreshTableUrlsBtn) {
+      el.refreshTableUrlsBtn.addEventListener('click', () => {
+        const urls = parseTableLinks();
+        state.tableLinks = urls;
+        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
+        renderTablePreview(urls);
+        updateButtons();
+      });
+    }
+    if (el.clearTableBtn) {
+      el.clearTableBtn.addEventListener('click', () => {
+        state.tableLinks = [];
+        if (el.tableFileInfo) el.tableFileInfo.hidden = true;
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
+        if (el.tablePreview) el.tablePreview.hidden = true;
+        if (el.tableGrid) el.tableGrid.innerHTML = '';
+        updateButtons();
+      });
+    }
+  }
+
+  function parseTableLinks() {
+    if (!el.tableUrlTextarea) return [];
+    return el.tableUrlTextarea.value
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(s => /^https?:\/\//i.test(s));
+  }
+
+  async function handleTableFiles(files) {
+    if (!files || files.length === 0) return;
+    await loadSheetJSFallback();
+    for (const file of files) {
+      try {
+        const urls = await parseSpreadsheet(file);
+        state.tableLinks = urls;
+        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
+        if (el.tableFileName) el.tableFileName.textContent = file.name;
+        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = urls.join('\n');
+        renderTablePreview(urls);
+      } catch (err) {
+        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
+        if (el.tableFileName) el.tableFileName.textContent = file.name + ' (错误)';
+        if (el.tableUrlCount) el.tableUrlCount.textContent = '解析失败: ' + (err.message || '');
+        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
+      }
+    }
+    updateButtons();
+  }
+
+  function renderTablePreview(urls) {
+    if (!el.tableGrid || !el.tablePreview) return;
+    if (!urls || urls.length === 0) {
+      el.tablePreview.hidden = true;
+      el.tableGrid.innerHTML = '';
+      return;
+    }
+    el.tablePreview.hidden = false;
+    el.tableGrid.innerHTML = urls.slice(0, 60).map(url => {
+      const safe = String(url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      return `<div class="file-grid-item">
+        <img src="${safe}" loading="lazy" onerror="this.style.opacity=0.3" alt="">
+        <div class="file-grid-name">${safe.slice(0, 40)}${safe.length > 40 ? '…' : ''}</div>
+      </div>`;
+    }).join('');
+  }
 
   // ====== 启动 ======
   if (document.readyState === 'loading') {
