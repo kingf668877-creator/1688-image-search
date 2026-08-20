@@ -1487,6 +1487,7 @@
     });
     const dropZone = el.tableFileInput.closest('.drop-zone');
     if (dropZone) {
+      dropZone.addEventListener('click', () => el.tableFileInput.click());
       dropZone.addEventListener('dragover', (e) => {
         e.preventDefault();
         dropZone.classList.add('dragover');
