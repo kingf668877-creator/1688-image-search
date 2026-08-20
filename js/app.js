@@ -96,7 +96,7 @@
 
   // ====== 全局状态 ======
   const state = {
-    currentTab: 'batch',   // batch | link | table
+    currentTab: 'link',    // batch | link | table
     files: [],             // 批量上传：已选择的文件列表
     tableFiles: [],        // 表格上传：每行的文件（按行号索引）
     tableRows: 0,          // 表格当前行数
