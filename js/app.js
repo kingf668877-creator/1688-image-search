@@ -145,10 +145,8 @@
     urlGrid: document.getElementById('urlGrid'),
 
     // 表格上传
-    tableGrid: document.getElementById('tableGrid'),
-    addTableRowBtn: document.getElementById('addTableRowBtn'),
-    clearTableBtn: document.getElementById('clearTableBtn'),
-    tableCount: document.getElementById('tableCount'),
+    tableLinksTextarea: document.getElementById('tableLinksTextarea'),
+    tableLinksMeta: document.getElementById('tableLinksMeta'),
     // Excel 表格上传 (与原 table 上传并存)
     tableFileInput: document.getElementById('tableFileInput'),
     tableFileList: document.getElementById('tableFileList'),
@@ -240,10 +238,6 @@
     setupFloatingPager();
     setupTableFileInput();
     setupLifecycleCleanup();
-    // 初始添加 3 行表格
-    addTableRow();
-    addTableRow();
-    addTableRow();
     updateButtons();
   }
 
@@ -560,151 +554,9 @@
     return item;
   }
 
-  // ====== 表格上传 ======
-  function setupTableUpload() {
-    el.addTableRowBtn.addEventListener('click', addTableRow);
-    el.clearTableBtn.addEventListener('click', clearTable);
-  }
-
-  function addTableRow() {
-    const row = document.createElement('div');
-    row.className = 'table-row';
-    row._file = null;  // 直接在 DOM 行上挂载 file 对象
-
-    const indexCell = document.createElement('div');
-    indexCell.className = 'table-row-index';
-
-    const uploadCell = document.createElement('div');
-    uploadCell.className = 'table-upload-cell';
-    uploadCell.innerHTML = `
-      <div class="table-cell-inner">
-        <div class="table-cell-icon">+</div>
-        <div class="table-cell-text">点击或拖入图片</div>
-      </div>
-      <input type="file" accept="image/*" hidden>
-    `;
-
-    const fileInput = uploadCell.querySelector('input');
-
-    // 点击触发文件选择
-    uploadCell.addEventListener('click', (e) => {
-      if (e.target.closest('.table-cell-remove')) return;
-      fileInput.click();
-    });
-
-    // 文件选择
-    fileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (file) {
-        setTableRowFile(row, file, uploadCell);
-      }
-      fileInput.value = '';
-    });
-
-    // 拖拽
-    uploadCell.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      uploadCell.classList.add('dragover');
-    });
-    uploadCell.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      uploadCell.classList.remove('dragover');
-    });
-    uploadCell.addEventListener('drop', (e) => {
-      e.preventDefault();
-      uploadCell.classList.remove('dragover');
-      const file = e.dataTransfer.files[0];
-      if (file && file.type.startsWith('image/')) {
-        setTableRowFile(row, file, uploadCell);
-      }
-    });
-
-    const removeCell = document.createElement('div');
-    removeCell.className = 'table-row-remove';
-    removeCell.innerHTML = '×';
-    removeCell.title = '删除该行';
-    removeCell.addEventListener('click', (e) => {
-      e.stopPropagation();
-      row.remove();
-      refreshTableIndices();
-      updateTableCount();
-      updateButtons();
-    });
-
-    row.appendChild(indexCell);
-    row.appendChild(uploadCell);
-    row.appendChild(removeCell);
-    el.tableGrid.appendChild(row);
-    refreshTableIndices();
-    updateTableCount();
-    updateButtons();
-  }
-
-  function setTableRowFile(row, file, cell) {
-    row._file = file;
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      cell.innerHTML = `
-        <img class="table-cell-img" src="${e.target.result}" alt="${file.name}">
-        <div class="table-cell-name">${file.name}</div>
-        <div class="table-cell-remove" title="移除">×</div>
-      `;
-      cell.classList.add('has-file');
-      // 绑定移除按钮
-      cell.addEventListener('click', (ev) => {
-        if (!ev.target.closest('.table-cell-remove')) return;
-        ev.stopPropagation();
-        row._file = null;
-        cell.classList.remove('has-file');
-        cell.innerHTML = `
-          <div class="table-cell-inner">
-            <div class="table-cell-icon">+</div>
-            <div class="table-cell-text">点击或拖入图片</div>
-          </div>
-          <input type="file" accept="image/*" hidden>
-        `;
-        const newInput = cell.querySelector('input');
-        newInput.addEventListener('change', (e2) => {
-          const f = e2.target.files[0];
-          if (f) setTableRowFile(row, f, cell);
-          newInput.value = '';
-        });
-        updateTableCount();
-        updateButtons();
-      }, { once: false });
-      updateTableCount();
-      updateButtons();
-    };
-    reader.readAsDataURL(file);
-  }
-
-  // 仅刷新行号显示，不触碰 file 数据
-  function refreshTableIndices() {
-    el.tableGrid.querySelectorAll('.table-row').forEach((row, i) => {
-      row.querySelector('.table-row-index').textContent = i + 1;
-    });
-  }
-
-  function clearTable() {
-    el.tableGrid.innerHTML = '';
-    addTableRow();
-    addTableRow();
-    addTableRow();
-    updateTableCount();
-    updateButtons();
-  }
-
-  // 遍历 DOM 行收集 file 对象
-  function getTableFiles() {
-    const files = [];
-    el.tableGrid.querySelectorAll('.table-row').forEach(row => {
-      if (row._file) files.push(row._file);
-    });
-    return files;
-  }
-
+  // ====== 表格上传 (legacy 更新计数, 兼容旧调用) ======
   function updateTableCount() {
-    el.tableCount.textContent = `${getTableFiles().length} 张图片`;
+    renderTableLinksMeta();
   }
 
   // ====== 更新按钮状态 ======
@@ -718,7 +570,7 @@
   function getCurrentFileCount() {
     if (state.currentTab === 'batch') return state.files.length;
     if (state.currentTab === 'link') return parseUrls().length;
-    if (state.currentTab === 'table') return getTableFiles().length;
+    if (state.currentTab === 'table') return parseTableLinks().length;
     return 0;
   }
 
@@ -732,7 +584,7 @@
         el.urlGrid.innerHTML = '';
         state.urlVisibleCount = PREVIEW_INITIAL;
         updateButtons();
-      } else if (state.currentTab === 'table') clearTable();
+      } else if (state.currentTab === 'table') clearTableLinks();
     });
     el.searchBtn.addEventListener('click', startSearch);
     el.exportJsonBtn.addEventListener('click', exportJson);
@@ -911,7 +763,18 @@
         };
       } else {
         // 批量 / 表格方式：调用 /api/upload
-        const files = state.currentTab === 'batch' ? state.files : getTableFiles();
+        if (state.currentTab === 'table') {
+          // 表格上传走链接批量上传流程
+          const urls = parseTableLinks();
+          if (urls.length === 0) {
+            throw new Error('没有可搜索的链接');
+          }
+          await startLinkUpload(urls, uploadStartTime);
+          return;
+        }
+
+        // 批量上传（图片文件流）
+        const files = state.files;
 
         // 立即显示进度条
         showProgress();
@@ -1755,15 +1618,14 @@
   }
 
   // ====== Excel / CSV 表格上传 (spreadsheet-drop-zone) ======
-  function setupTableFileInput() {
+    // ====== 表格上传 (Excel / CSV) -> 自动填入 textarea ======
+  function setupTableLinksInput() {
     if (!el.tableFileInput) return;
-
     el.tableFileInput.addEventListener('change', (e) => {
       const fl = Array.from(e.target.files || []);
       handleTableFiles(fl);
       el.tableFileInput.value = '';
     });
-
     // 拖拽
     const dropZone = el.tableFileInput.closest('.spreadsheet-drop-zone');
     if (dropZone) {
@@ -1771,9 +1633,7 @@
         e.preventDefault();
         dropZone.classList.add('drag-over');
       });
-      dropZone.addEventListener('dragleave', () => {
-        dropZone.classList.remove('drag-over');
-      });
+      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
       dropZone.addEventListener('drop', (e) => {
         e.preventDefault();
         dropZone.classList.remove('drag-over');
@@ -1781,6 +1641,34 @@
         handleTableFiles(fl);
       });
     }
+    // textarea 实时更新计数
+    if (el.tableLinksTextarea) {
+      const update = () => renderTableLinksMeta();
+      el.tableLinksTextarea.addEventListener('input', update);
+      update();
+    }
+  }
+
+  function parseTableLinks() {
+    if (!el.tableLinksTextarea) return [];
+    return el.tableLinksTextarea.value
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(s => /^https?:\/\//i.test(s));
+  }
+
+  function clearTableLinks() {
+    if (el.tableLinksTextarea) el.tableLinksTextarea.value = '';
+    if (el.tableFileList) el.tableFileList.innerHTML = '';
+    el.tableFileList && (el.tableFileList.style.display = 'none');
+    state.tableLinks = [];
+    renderTableLinksMeta();
+  }
+
+  function renderTableLinksMeta() {
+    if (!el.tableLinksMeta) return;
+    const urls = parseTableLinks();
+    el.tableLinksMeta.textContent = `${urls.length} 条链接`;
   }
 
   async function handleTableFiles(files) {
@@ -1789,26 +1677,212 @@
     el.tableFileList.style.display = 'flex';
     for (const file of files) {
       try {
-        const ext = (file.name.split('.').pop() || '').toLowerCase();
-        let urls = [];
-        if (ext === 'csv') urls = await parseCsvFile(file);
-        else if (ext === 'xlsx' || ext === 'xls') urls = await parseXlsxFile(file);
-        else throw new Error('不支持的文件类型: ' + ext);
-
-        appendTableFileRow(file.name, urls.length);
-        // 注入到 URL 输入框
-        if (el.urlTextarea) {
-          const existing = el.urlTextarea.value.trim();
-          el.urlTextarea.value = (existing ? existing + '\n' : '') + urls.join('\n');
-        }
-        // 同步触发 link 上传预览 (手动 broadcast input 事件)
-        if (el.urlTextarea) {
-          el.urlTextarea.dispatchEvent(new Event('input', { bubbles: true }));
+        const urls = await parseSpreadsheet(file);
+        state.tableLinks = urls;
+        appendTableFileRow(file.name, urls.length, null);
+        // 填入 textarea
+        if (el.tableLinksTextarea) {
+          el.tableLinksTextarea.value = urls.join('\n');
+          renderTableLinksMeta();
         }
       } catch (err) {
-        appendTableFileRow(file.name + ' (错误: ' + (err.message || '解析失败') + ')', 0);
+        appendTableFileRow(file.name, 0, err.message || '解析失败');
       }
     }
+  }
+
+  function appendTableFileRow(name, count, error) {
+    if (!el.tableFileList) return;
+    const row = document.createElement('div');
+    row.className = 'table-file-row' + (error ? ' is-error' : '');
+    const nameEl = document.createElement('span');
+    nameEl.className = 'name';
+    nameEl.textContent = name;
+    const countEl = document.createElement('span');
+    countEl.className = 'count';
+    if (error) {
+      countEl.textContent = '错误: ' + error;
+    } else {
+      countEl.textContent = `提取 ${count} 条链接`;
+    }
+    const actions = document.createElement('div');
+    actions.className = 'row-actions';
+    const removeBtn = document.createElement('button');
+    removeBtn.type = 'button';
+    removeBtn.className = 'remove-file';
+    removeBtn.textContent = '移除';
+    removeBtn.addEventListener('click', () => {
+      row.remove();
+      if (el.tableLinksTextarea) {
+        el.tableLinksTextarea.value = '';
+        renderTableLinksMeta();
+      }
+    });
+    actions.appendChild(removeBtn);
+    row.appendChild(nameEl);
+    row.appendChild(countEl);
+    row.appendChild(actions);
+    el.tableFileList.appendChild(row);
+  }
+
+  // ============ Excel / CSV / XLS 解析 ============
+  async function parseSpreadsheet(file) {
+    const ext = (file.name.split('.').pop() || '').toLowerCase();
+    if (ext === 'csv') return parseCsvFile(file);
+    if (ext === 'xlsx' || ext === 'xls') return parseXlsxFile(file);
+    throw new Error('不支持的文件类型: ' + ext);
+  }
+
+  async function parseCsvFile(file) {
+    const text = await file.text();
+    const lines = text.split(/\r?\n/);
+    if (lines.length === 0) return [];
+    const header = splitCsvLine(lines[0]).map(c => c.trim().toLowerCase());
+    let urlCol = header.findIndex(h => /url|link|image|picture|图片|链接/.test(h));
+    let start = 0;
+    if (urlCol >= 0) start = 1;
+    else urlCol = 0;
+    const urls = [];
+    for (let i = start; i < lines.length; i++) {
+      const cells = splitCsvLine(lines[i]);
+      const v = (cells[urlCol] || '').trim();
+      if (/^https?:\/\//i.test(v)) urls.push(v);
+    }
+    return urls;
+  }
+
+  function splitCsvLine(line) {
+    const out = [];
+    let cur = '';
+    let inQ = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (c === '"') {
+        if (inQ && line[i + 1] === '"') { cur += '"'; i++; }
+        else inQ = !inQ;
+      } else if (c === ',' && !inQ) {
+        out.push(cur); cur = '';
+      } else cur += c;
+    }
+    out.push(cur);
+    return out;
+  }
+
+  async function parseXlsxFile(file) {
+    if (typeof XLSX === 'undefined') {
+      throw new Error('xlsx 解析库未加载，请检查网络');
+    }
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const sheetName = wb.SheetNames[0];
+    const sheet = wb.Sheets[sheetName];
+    if (!sheet) return [];
+    const rows = XLSX.utils.sheet_to_json(sheet, { defval: '', raw: true });
+    if (rows.length === 0) return [];
+    // 找 url 列
+    const keys = Object.keys(rows[0]);
+    const lcKeys = keys.map(k => ({ k, lk: k.toLowerCase() }));
+    let urlCol = lcKeys.find(c => /url|link|image|picture|图片|链接/.test(c.lk));
+    if (!urlCol) urlCol = lcKeys[0];
+    const urls = [];
+    for (const row of rows) {
+      const v = String(row[urlCol.k] || '').trim();
+      if (/^https?:\/\//i.test(v)) urls.push(v);
+    }
+    return urls;
+  }
+
+  // 把 link 上传流程独立出来, 表格 Tab 复用
+  async function startLinkUpload(urls, uploadStartTime) {
+    const totalUrls = urls.length;
+    const CHUNK_SIZE = 50;
+    const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
+    let taskId = null;
+    let totalUploaded = 0;
+    let totalFailed = 0;
+    let allFailedFiles = [];
+    let streamingStarted = false;
+
+    showProgress();
+    updateProgress({
+      status: 'searching',
+      message: `正在下载 ${totalUrls} 张图片...`,
+      current: 0,
+      total: totalUrls,
+      downloaded_count: 0,
+      searched_count: 0,
+      is_streaming: true,
+    });
+
+    const firstChunkUrls = urls.slice(0, CHUNK_SIZE);
+    const isFirstOnly = totalChunks === 1;
+
+    el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${Math.min(CHUNK_SIZE, totalUrls)}/${totalUrls} 张并启动搜索...</span>`;
+
+    const firstRequestId = createRequestId('first');
+    const firstRes = await fetchWithRetry('/api/upload_urls', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        urls: firstChunkUrls,
+        auto_search: true,
+        expected_total: totalUrls,
+        is_last_batch: isFirstOnly,
+        request_id: firstRequestId,
+      }),
+    }, { attempts: 3, timeout: 190000, showError: false });
+
+    if (!firstRes.ok) {
+      const err = await firstRes.json().catch(() => ({}));
+      throw new Error(err.error || '上传失败');
+    }
+    const firstData = await firstRes.json();
+    taskId = firstData.task_id;
+    totalUploaded += firstData.uploaded_count || firstChunkUrls.length;
+    totalFailed += firstData.failed_count || 0;
+    if (Array.isArray(firstData.failed_files)) allFailedFiles.push(...firstData.failed_files);
+
+    state.taskId = taskId;
+    state.cleanupSentTaskId = null;
+
+    const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
+    el.uploadTiming.style.display = 'flex';
+    el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
+
+    startPolling();
+    if (typeof startStreamingProgress === 'function') startStreamingProgress(totalUrls);
+
+    // 后续 chunk（增量）
+    let chunkIdx = 1;
+    for (let ci = 1; ci < totalChunks; ci++) {
+      const chunkUrls = urls.slice(ci * CHUNK_SIZE, (ci + 1) * CHUNK_SIZE);
+      const isLast = ci === totalChunks - 1;
+      const reqId = createRequestId('chunk' + ci);
+      try {
+        const res = await fetchWithRetry('/api/upload_urls', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            urls: chunkUrls,
+            task_id: taskId,
+            auto_search: true,
+            expected_total: totalUrls,
+            is_last_batch: isLast,
+            request_id: reqId,
+          }),
+        }, { attempts: 3, timeout: 190000, showError: false });
+        if (res.ok) {
+          const data = await res.json();
+          totalUploaded += data.uploaded_count || chunkUrls.length;
+          totalFailed += data.failed_count || 0;
+          if (Array.isArray(data.failed_files)) allFailedFiles.push(...data.failed_files);
+        }
+      } catch (err) {
+        console.warn('chunk upload failed:', err);
+      }
+    }
+
+    return { taskId, totalUploaded, totalFailed, failedFiles: allFailedFiles };
   }
 
   function appendTableFileRow(name, count) {
@@ -2158,7 +2232,7 @@
     el.urlTextarea.value = '';
     el.urlPreview.style.display = 'none';
     state.urlVisibleCount = PREVIEW_INITIAL;
-    clearTable();
+    clearTableLinks();
     el.resultSection.style.display = 'none';
     el.progressSection.style.display = 'none';
     el.uploadTiming.style.display = 'none';
