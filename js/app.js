@@ -632,9 +632,9 @@
     try {
       let uploadData;
 
-      if (state.currentTab === 'link') {
-        // 链接方式：流水线并行（边下载边搜索）
-        const urls = parseUrls();
+      if (state.currentTab === 'link' || state.currentTab === 'table') {
+        // 链接/表格方式：流水线并行（边下载边搜索）
+        const urls = state.currentTab === 'table' ? parseTableLinks() : parseUrls();
         const totalUrls = urls.length;
         const CHUNK_SIZE = 50; // 每批50个URL
         const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
