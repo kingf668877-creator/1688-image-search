@@ -7,7 +7,7 @@
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
 <title>1688 图搜批量寻源 - 以图搜款找货源</title>
-<link rel="stylesheet" href="css/style.css?v=20260820-unify">
+<link rel="stylesheet" href="css/style.css?v=20260820-unify-pager">
 <link rel="icon" type="image/png" href="logo.png">
 </head>
 <body>
@@ -164,7 +164,15 @@
         <!-- 方式三：图片表格批量上传 -->
         <div class="upload-panel" id="panel-table">
           <div class="table-upload-wrap">
-            <p class="panel-hint">每个单元格上传一张图片，点击单元格选择文件或拖入图片，可任意添加行数</p>
+            <p class="panel-hint"><b>方式 A：上传 Excel / CSV 表格</b>（按列名识别图片链接，自动填入下方链接区）</p>
+            <label class="spreadsheet-drop-zone" for="tableFileInput">
+              <span class="spreadsheet-icon">��</span>
+              <strong>点击选择表格文件</strong>
+              <span>支持 .xlsx / .xls / .csv</span>
+              <input id="tableFileInput" type="file" accept=".xlsx,.xls,.csv" multiple hidden>
+            </label>
+            <div class="table-file-list" id="tableFileList" style="display:none"></div>
+            <p class="panel-hint" style="margin-top:16px;"><b>方式 B：手动添加行</b>（每个单元格选一张图片）</p>
             <div class="table-grid" id="tableGrid">
               <!-- 表格行由 JS 动态生成 -->
             </div>
@@ -282,7 +290,28 @@
       <!-- 图片结果列表 -->
       <div class="result-list" id="resultList"></div>
 
-      <!-- 分页组件 -->
+            <div class="pager-sentinel" id="pagerSentinel"></div>
+      <div class="result-pager" id="resultPager" hidden>
+        <div class="pager-inner">
+          <button class="pager-arrow" id="pagerPrev" type="button" aria-label="上一页">‹ 上一页</button>
+          <div class="pager-info" id="pagerInfo">第 1 / 1 页</div>
+          <div class="pager-pages" id="pagerPages"></div>
+          <button class="pager-arrow" id="pagerNext" type="button" aria-label="下一页">下一页 ›</button>
+          <label class="pager-size">
+            每页
+            <select id="pagerSizeInput">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+            </select>
+            张
+          </label>
+          <button class="pager-top" id="pagerTop" type="button" aria-label="回到顶部" title="回到顶部">↑</button>
+        </div>
+        <div class="pager-message" id="pagerMessage" style="display:none"></div>
+      </div>
+
+      <!-- 顶部工具栏式分页（保留旧版位置） -->
       <div class="pagination-wrap" id="paginationWrap" style="display: none;">
         <div class="pagination-info">
           <span id="paginationInfo">第 1-10 条，共 0 条</span>
@@ -406,6 +435,6 @@
   </div>
 </div>
 
-<script src="js/app.js?v=20260820-unify"></script>
+<script src="js/app.js?v=20260820-unify-pager"></script>
 </body>
 </html>
