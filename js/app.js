@@ -924,7 +924,8 @@
 
   async function resumeHistoryTask(taskId, failedOnly) {
     state.taskId = taskId;
-    const endpoint = failedOnly ? `/api/tasks/${taskId}/retry-failed` : `/api/search/${taskId}`;
+    // 后端没有 /api/tasks/<id>/retry-failed；统一退化为 /api/search/<id>。
+    const endpoint = `/api/search/${encodeURIComponent(taskId)}`;
     const res = await fetch(`${state.apiBase}${endpoint}`, { method: 'POST' });
     const json = await res.json();
     if (!res.ok) { alert(json.error || '任务启动失败'); return; }
@@ -935,9 +936,10 @@
   }
 
   async function deleteHistoryTask(taskId) {
-    if (!confirm('删除该任务？图片和搜索结果会从磁盘清除，不可恢复。')) return;
+    if (!confirm('删除该任务？图片和搜索结果会从后端内存清除，重启后端后任务会自动消失。')) return;
     try {
-      const res = await fetch(`${state.apiBase}/api/cleanup/${taskId}`, { method: 'POST' });
+      // 后端实际路由是 POST /api/tasks/<task_id>/cleanup；前端之前误写为 /api/cleanup/<task_id> 导致 404。
+      const res = await fetch(`${state.apiBase}/api/tasks/${encodeURIComponent(taskId)}/cleanup`, { method: 'POST' });
       if (!res.ok) throw new Error(`cleanup_failed_${res.status}`);
       forgetOwnedTasks([taskId]);
       loadTaskHistory();
@@ -972,8 +974,12 @@
   function cleanupOwnedTasksBeacon() {
     const ids = Array.from(state.ownedTaskIds);
     if (!ids.length || !navigator.sendBeacon) return;
-    const body = new Blob([JSON.stringify({ taskIds: ids })], { type: 'text/plain;charset=UTF-8' });
-    navigator.sendBeacon(`${state.apiBase}/api/cleanup_batch`, body);
+    // 后端没有 /api/cleanup_batch；逐个通过 sendBeacon 触发清理（即使页面已关闭，Beacon 也通常能送达）。
+    ids.forEach((tid) => {
+      try {
+        navigator.sendBeacon(`${state.apiBase}/api/tasks/${encodeURIComponent(tid)}/cleanup`);
+      } catch {}
+    });
   }
   function setupLifecycle() {
     // 退出时尽力发送 Beacon；不移除本地 ID，下次加载会再次确认删除。
