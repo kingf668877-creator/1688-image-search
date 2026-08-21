@@ -328,8 +328,7 @@
       const ta = $('#tableUrlTextarea');
       ta.value = unique.join('\n');
       ta.readOnly = false; // 允许用户编辑
-      // 上传完直接渲染预览网格，让用户一眼看到识别到的链接；无链接时才隐藏。
-      renderTableGrid();
+      // 上传完默认不展开预览，需用户点击「预览链接」才渲染网格；无链接时隐藏预览区。
       $('#tablePreview').hidden = state.tableUrls.length === 0;
 
       updateSearchBtn();
