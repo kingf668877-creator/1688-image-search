@@ -938,12 +938,15 @@ textarea:focus { border-color: var(--primary); box-shadow: 0 0 0 3px var(--prima
   padding: 8px 14px;
   background: var(--primary-bg);
   color: var(--primary);
+  border: none;
+  cursor: pointer;
   border-radius: var(--radius-md);
   font-size: 13px;
   font-weight: 600;
   text-align: center;
   white-space: nowrap;
   transition: all 0.2s;
+  font-family: inherit;
 }
 .btn-view-more:hover { background: var(--primary); color: white; }
 
