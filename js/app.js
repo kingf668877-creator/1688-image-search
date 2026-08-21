@@ -323,12 +323,14 @@
 
       // 展示文件信息和识别到的链接
       $('#tableFileInfo').hidden = false;
-      $('#tablePreview').hidden = true; // 默认不显示预览
       $('#tableFileName').textContent = '📄 ' + file.name;
       $('#tableUrlCount').textContent = `${unique.length} 条链接`;
       const ta = $('#tableUrlTextarea');
       ta.value = unique.join('\n');
       ta.readOnly = false; // 允许用户编辑
+      // 上传完直接渲染预览网格，让用户一眼看到识别到的链接；无链接时才隐藏。
+      renderTableGrid();
+      $('#tablePreview').hidden = state.tableUrls.length === 0;
 
       updateSearchBtn();
     } catch (e) {
@@ -454,11 +456,17 @@
     startPolling();
     try {
       if (state.activeTab === 'batch') {
-        endpoint = `${state.apiBase}/api/upload/${state.taskId}`;
+        // 后端 /api/upload 不接受 path 参数，task_id 由后端生成；前端用前端临时 ID 占位以绑定进度轮询，
+        // 拿到后端真实 task_id 后立即替换 state.taskId 并重定向轮询/搜索请求。
+        endpoint = `${state.apiBase}/api/upload`;
         const fd = new FormData();
         state.files.forEach((f) => fd.append('files', f.file));
         const res = await fetchWithRetry(endpoint, { method: 'POST', body: fd });
         const json = await res.json();
+        const serverTaskId = json.task_id || json.taskId;
+        if (serverTaskId && serverTaskId !== state.taskId) {
+          state.taskId = serverTaskId;
+        }
         // 立刻触发搜索
         await fetchWithRetry(`${state.apiBase}/api/search/${state.taskId}`, { method: 'POST' });
       } else if (state.activeTab === 'link') {
