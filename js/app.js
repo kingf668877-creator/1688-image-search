@@ -387,13 +387,15 @@
       const isLast = i + batch.length >= allUrls.length;
       // 第一批次不传 task_id，触发后端首次上传 + 启动流式搜索；之后所有批次带后端真实 task_id
       const payloadTaskId = serverTaskId || null;
+      // 第一批次无论是否最后一批，都让后端启动流式搜索；后续批次不再触发
+      const autoSearch = serverTaskId == null;
       try {
         const res = await fetchWithRetry(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             urls: batch,
-            auto_search: isLast && !serverTaskId, // 第一批次完成后启动搜索
+            auto_search: autoSearch,
             task_id: payloadTaskId,
             is_last_batch: isLast,
             expected_total: allUrls.length,
