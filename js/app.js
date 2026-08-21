@@ -315,7 +315,7 @@
 
       // 从所有文本中提取图片链接
       const urlRegex = /https?:\/\/[^\s"',;|}\]]+\.(?:jpg|jpeg|png|webp|gif|bmp|tiff?)(?:\?[^\s"',;|}\]]*)?/gi;
-      const matches = allText.match(urlRegex) || [];
+      const matches = allTextMatch || [];
       // 去重
       const unique = [...new Set(matches.map((u) => u.trim()))];
 
@@ -712,10 +712,56 @@
     node.querySelector('.mini-title').textContent = item.title || '暂无标题';
     node.querySelector('.mini-rank').textContent = '#' + rank;
     node.querySelector('.mini-price').textContent = item.price ? `¥ ${item.price}` : '-';
+
+    // 起批量
+    const moqEl = node.querySelector('.mini-moq');
+    if (moqEl) moqEl.textContent = item.quantity_begin || '';
+
+    // 销量 + 订单数
+    const salesRow = node.querySelector('.mini-sales-row');
+    if (salesRow) {
+      const parts = [];
+      if (item.sale_quantity) parts.push(`<span class="mini-sales-item" title="总销量">📦 ${item.sale_quantity}</span>`);
+      if (item.booked_count) parts.push(`<span class="mini-sales-item" title="总订单数">📋 ${item.booked_count}</span>`);
+      salesRow.innerHTML = parts.join('');
+      salesRow.style.display = parts.length ? '' : 'none';
+    }
+
+    // 旧版 meta（评分 / 评价）
     const meta = node.querySelector('.mini-meta');
     meta.innerHTML = '';
     if (item.rating) meta.appendChild(h('span', { class: 'mini-meta-item' }, `⭐ ${item.rating}`));
-    if (item.reviews) meta.appendChild(h('span', { class: 'mini-meta-item' }, `💬 ${item.reviews} 条评价`));
+    if (item.reviews) meta.appendChild(h('span', { class: 'mini-meta-item' }, `💬 ${item.reviews}`));
+
+    // 店铺 + 城市 + 年限
+    const shopBlock = node.querySelector('.mini-shop-block');
+    const shopLink = node.querySelector('.mini-shop-link');
+    const shopMetaEl = node.querySelector('.mini-shop-meta');
+    if (shopBlock && shopLink) {
+      if (item.shop) {
+        const url = item.win_port_url || item.shop_url || '#';
+        shopLink.textContent = item.shop;
+        if (url && url !== '#') {
+          shopLink.href = url;
+          shopLink.target = '_blank';
+          shopLink.rel = 'noopener';
+        } else {
+          shopLink.removeAttribute('href');
+        }
+        const metaParts = [];
+        if (item.city) metaParts.push(`<span class="mini-shop-city">📍 ${item.city}</span>`);
+        if (item.shop_year) metaParts.push(`<span class="mini-shop-year">🏪 ${item.shop_year}</span>`);
+        if (shopMetaEl) shopMetaEl.innerHTML = metaParts.join('');
+        shopBlock.style.display = '';
+      } else {
+        shopBlock.style.display = 'none';
+      }
+    }
+
+    // 广告角标
+    const adEl = node.querySelector('.mini-ad-badge');
+    if (adEl) adEl.style.display = item.is_ad ? '' : 'none';
+
     return node;
   }
 
@@ -729,8 +775,52 @@
     const meta = node.querySelector('.product-meta');
     meta.innerHTML = '';
     if (item.rating) meta.appendChild(h('span', { class: 'meta-item' }, `⭐ ${item.rating}`));
-    if (item.reviews) meta.appendChild(h('span', { class: 'meta-item' }, `💬 ${item.reviews} 条评价`));
+    if (item.reviews) meta.appendChild(h('span', { class: 'meta-item' }, `💬 ${item.reviews}`));
     if (item.rank) meta.appendChild(h('span', { class: 'meta-item' }, `#${item.rank}`));
+
+    // 起批量
+    const moqEl = node.querySelector('.product-moq');
+    if (moqEl) moqEl.textContent = item.quantity_begin || '';
+
+    // 销量 + 订单数
+    const salesRow = node.querySelector('.product-sales-row');
+    if (salesRow) {
+      const parts = [];
+      if (item.sale_quantity) parts.push(`<span class="product-sales-item" title="总销量">📦 ${item.sale_quantity}</span>`);
+      if (item.booked_count) parts.push(`<span class="product-sales-item" title="总订单数">📋 ${item.booked_count}</span>`);
+      salesRow.innerHTML = parts.join('');
+      salesRow.style.display = parts.length ? '' : 'none';
+    }
+
+    // 店铺
+    const shopBlock = node.querySelector('.product-shop-block');
+    const shopLink = node.querySelector('.product-shop-link');
+    const shopMetaEl = node.querySelector('.product-shop-meta');
+    if (shopBlock && shopLink) {
+      if (item.shop) {
+        const url = item.win_port_url || item.shop_url || '#';
+        shopLink.textContent = item.shop;
+        if (url && url !== '#') {
+          shopLink.href = url;
+          shopLink.target = '_blank';
+          shopLink.rel = 'noopener';
+        } else {
+          shopLink.removeAttribute('href');
+        }
+        const metaParts = [];
+        if (item.city) metaParts.push(`<span class="product-shop-city">📍 ${item.city}</span>`);
+        if (item.shop_year) metaParts.push(`<span class="product-shop-year">🏪 ${item.shop_year}</span>`);
+        if (shopMetaEl) shopMetaEl.innerHTML = metaParts.join('');
+        shopBlock.style.display = '';
+      } else {
+        shopBlock.style.display = 'none';
+      }
+    }
+
+    // 广告角标
+    const adEl = node.querySelector('.product-ad-badge');
+    if (adEl) adEl.style.display = item.is_ad ? '' : 'none';
+
     const fill = node.querySelector('.similarity-fill');
     const sim = item.similarity != null ? item.similarity : (item.rank ? Math.max(0, 1 - item.rank / 50) : 0.5);
     fill.style.width = Math.max(10, Math.min(100, sim * 100)) + '%';
