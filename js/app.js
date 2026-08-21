@@ -437,7 +437,7 @@
       throw new Error(`${stillFailed.length} 个批次提交失败（约 ${stillFailed.reduce((s, b) => s + b.batch.length, 0)} 张图片），已提交部分会在后台继续，也可稍后在任务记录中点"继续任务"补传`);
     }
     state.submittedOk = allUrls.length;
-    }
+  }
 
   async function startSearch() {
     if (state.isSearching) return;
@@ -529,7 +529,7 @@
       $('#elapsedTime').textContent = fmtClock(sec);
     }, 1000);
     poll();
-    state.pollTimer = =Setinterval(poll, POLL_INTERVAL);
+    state.pollTimer = setInterval(poll, POLL_INTERVAL);
   }
   function stopPolling() {
     if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
@@ -733,7 +733,7 @@
     if (item.rating) meta.appendChild(h('span', { class: 'mini-meta-item' }, `⭐ ${item.rating}`));
     if (item.reviews) meta.appendChild(h('span', { class: 'mini-meta-item' }, `💬 ${item.reviews}`));
 
-    // 店铺 + 城市 + 年限（span + JS 跳转，避免 <a> 嵌套）
+    // 店铺 + 城市 + 年限
     const shopBlock = node.querySelector('.mini-shop-block');
     const shopLink = node.querySelector('.mini-shop-link');
     const shopMetaEl = node.querySelector('.mini-shop-meta');
@@ -742,6 +742,7 @@
         const url = item.win_port_url || item.shop_url || '#';
         shopLink.textContent = item.shop;
         if (url && url !== '#') {
+          // 不能用 <a>（因为外层 mini-card 是 <a>），改用 span + JS 跳转
           shopLink.style.cursor = 'pointer';
           shopLink.onclick = (e) => {
             e.stopPropagation();
@@ -797,7 +798,7 @@
       salesRow.style.display = parts.length ? '' : 'none';
     }
 
-    // 店铺（span + JS 跳转，避免 <a> 嵌套）
+    // 店铺
     const shopBlock = node.querySelector('.product-shop-block');
     const shopLink = node.querySelector('.product-shop-link');
     const shopMetaEl = node.querySelector('.product-shop-meta');
@@ -806,6 +807,7 @@
         const url = item.win_port_url || item.shop_url || '#';
         shopLink.textContent = item.shop;
         if (url && url !== '#') {
+          // 不能用 <a>（因为外层 product-card 是 <a>），改用 span + JS 跳转
           shopLink.style.cursor = 'pointer';
           shopLink.onclick = (e) => {
             e.stopPropagation();
@@ -1114,25 +1116,29 @@
 
   // ============== Init ==============
   async function init() {
-    state.apiBase = getApiBase();
-    $('#apiBaseInput').value = state.apiBase;
-    setupBatchUpload();
-    setupUrlPanel();
-    setupTablePanel();
-    setupPagination();
-    setupSettings();
-    setupResultModal();
-    setupNotice();
-    setupLifecycle();
-    $$('.upload-tab').forEach((b) => on(b, 'click', () => switchTab(b.dataset.tab)));
-    on($('#searchBtn'), 'click', startSearch);
-    on($('#cancelBtn'), 'click', cancelCurrentTask);
-    on($('#clearBtn'), 'click', clearCurrentTab);
-    on($('#exportExcelBtn'), 'click', exportExcel);
-    on($('#newSearchBtn'), 'click', newSearch);
-    on($('#refreshHistoryBtn'), 'click', loadTaskHistory);
-    on($('#loadMoreFilesBtn'), 'click', () => { state.fileRenderCount += FILE_RENDER_BATCH; renderFileList(); });
+    const _step = (name, fn) => {
+      try { fn(); console.log('[init]', name, 'ok'); }
+      catch (e) { console.error('[init]', name, 'FAILED:', e.message, e.stack); }
+    };
+    _step('apiBase', () => { state.apiBase = getApiBase(); $('#apiBaseInput').value = state.apiBase; });
+    _step('setupBatchUpload', setupBatchUpload);
+    _step('setupUrlPanel', setupUrlPanel);
+    _step('setupTablePanel', setupTablePanel);
+    _step('setupPagination', setupPagination);
+    _step('setupSettings', setupSettings);
+    _step('setupResultModal', setupResultModal);
+    _step('setupNotice', setupNotice);
+    _step('setupLifecycle', setupLifecycle);
+    _step('tabClick', () => $$('.upload-tab').forEach((b) => on(b, 'click', () => switchTab(b.dataset.tab))));
+    _step('searchBtn', () => on($('#searchBtn'), 'click', startSearch));
+    _step('cancelBtn', () => on($('#cancelBtn'), 'click', cancelCurrentTask));
+    _step('clearBtn', () => on($('#clearBtn'), 'click', clearCurrentTab));
+    _step('exportExcelBtn', () => on($('#exportExcelBtn'), 'click', exportExcel));
+    _step('newSearchBtn', () => on($('#newSearchBtn'), 'click', newSearch));
+    _step('refreshHistoryBtn', () => on($('#refreshHistoryBtn'), 'click', loadTaskHistory));
+    _step('loadMoreFilesBtn', () => on($('#loadMoreFilesBtn'), 'click', () => { state.fileRenderCount += FILE_RENDER_BATCH; renderFileList(); }));
     state.fileRenderCount = FILE_RENDER_BATCH;
+    console.log('[init] all bindings done');
     try { await cleanupOwnedTasksConfirmed(); } catch (e) { console.warn('startup cleanup failed:', e); }
     loadTaskHistory();
     // 默认使用线上后端，设置弹窗仍允许手动覆盖。
@@ -1141,3 +1147,6 @@
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
   else init();
 })();
+window.addEventListener('unhandledrejection', (e) => {
+  console.error('[unhandledrejection]', e.reason?.message || e.reason, e.reason?.stack || '');
+});
