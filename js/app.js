@@ -716,10 +716,11 @@
     $('#resultModalThumb').src = `${state.apiBase}/uploads/${state.taskId}/${encodeURIComponent(imgName)}`;
     $('#resultModalTitle').textContent = imgName;
     const items = (entry.results || []).slice().sort((a, b) => (a.rank || 0) - (b.rank || 0));
-    // 展示分阶段耗时：上传 / 图搜 / 总计
-    const upS = entry.upload_seconds != null ? entry.upload_seconds : 0;
-    const srS = entry.search_seconds != null ? entry.search_seconds : (entry.search_time || 0);
-    const totalS = entry.total_seconds != null ? entry.total_seconds : (entry.search_time || 0);
+    // 展示分阶段耗时：上传 / 图搜 / 总计（强制转 number，防止后端返回字符串导致 toFixed 报错）
+    const num = (v, fb = 0) => { const n = Number(v); return Number.isFinite(n) ? n : fb; };
+    const upS = entry.upload_seconds != null ? num(entry.upload_seconds) : 0;
+    const srS = entry.search_seconds != null ? num(entry.search_seconds) : num(entry.search_time);
+    const totalS = entry.total_seconds != null ? num(entry.total_seconds) : num(entry.search_time);
     const durText = `上传 ${upS.toFixed(1)}s · 搜索 ${srS.toFixed(1)}s · 总计 ${totalS.toFixed(1)}s`;
     $('#resultModalSub').textContent = `共 ${items.length} 个结果 · ${durText}`;
     const grid = $('#resultModalGrid');
