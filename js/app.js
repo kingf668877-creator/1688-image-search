@@ -377,17 +377,41 @@
 
   // ============== Search Flow ==============
   // 逐批提交 URL：后端立即接收并后台下载。单批失败不中断，最后统一重试一轮。
+  // 第一批次故意不传 task_id，让后端走「首次上传」分支并立刻启动流式搜索；
+  // 拿到后端真实 task_id 后，后续批次都用它追加；只有 is_last_batch 才让后端收尾 download_complete。
   async function submitUrlBatches(endpoint, allUrls) {
     const failedBatches = [];
+    let serverTaskId = null;
     for (let i = 0; i < allUrls.length; i += CHUNK_SIZE) {
       const batch = allUrls.slice(i, i + CHUNK_SIZE);
       const isLast = i + batch.length >= allUrls.length;
+      // 第一批次不传 task_id，触发后端首次上传 + 启动流式搜索；之后所有批次带后端真实 task_id
+      const payloadTaskId = serverTaskId || null;
       try {
-        await fetchWithRetry(endpoint, {
+        const res = await fetchWithRetry(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ urls: batch, auto_search: isLast, task_id: state.taskId, is_last_batch: isLast, expected_total: allUrls.length }),
+          body: JSON.stringify({
+            urls: batch,
+            auto_search: isLast && !serverTaskId, // 第一批次完成后启动搜索
+            task_id: payloadTaskId,
+            is_last_batch: isLast,
+            expected_total: allUrls.length,
+          }),
         }, 2);
+        if (!serverTaskId) {
+          try {
+            const json = await res.clone().json();
+            const tid = json.task_id || json.taskId;
+            if (tid) {
+              serverTaskId = tid;
+              if (tid !== state.taskId) {
+                state.taskId = tid;
+                registerOwnedTask(tid);
+              }
+            }
+          } catch {}
+        }
       } catch (e) {
         console.warn('batch submit failed, will retry later:', e.message);
         failedBatches.push({ batch, isLast });
