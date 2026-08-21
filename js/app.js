@@ -978,12 +978,20 @@
     btn.disabled = true;
     btn.textContent = '⏳ 正在停止...';
     $('#progressStatus').textContent = '⏳ 正在停止任务...';
+    const cancelledId = state.taskId;
     try {
-      await fetch(`${state.apiBase}/api/tasks/${state.taskId}/cancel`, { method: 'POST' });
+      await fetch(`${state.apiBase}/api/tasks/${cancelledId}/cancel`, { method: 'POST' });
     } catch (e) {
       console.warn('cancel failed:', e);
     }
     // 后端主循环检测到 canceled 会跳出，polling 检测到 status=failed 后会自动收尾
+    // 用户要求：停止任务时也删除该任务的所有商品结果（不等下一次启动 cleanup）
+    try {
+      await fetch(`${state.apiBase}/api/tasks/${encodeURIComponent(cancelledId)}/cleanup`, { method: 'POST' });
+      forgetOwnedTasks([cancelledId]);
+    } catch (e) {
+      console.warn('cleanup after cancel failed:', e);
+    }
   }
 
   function clearCurrentTab() {
@@ -1086,6 +1094,25 @@
     taskIds.forEach((taskId) => state.ownedTaskIds.delete(taskId));
     persistPendingCleanupIds();
   }
+  // 用户要求：刷新 / 启动时把后端所有任务的商品全部清空。
+  async function cleanupAllServerTasks() {
+    try {
+      const r = await fetch(`${state.apiBase}/api/tasks`);
+      if (!r.ok) return;
+      const j = await r.json();
+      const tasks = (j.tasks || []).map((t) => t.task_id || t.taskId).filter(Boolean);
+      // 逐个 cleanup（任一失败不影响其它）
+      await Promise.all(tasks.map((tid) =>
+        fetch(`${state.apiBase}/api/tasks/${encodeURIComponent(tid)}/cleanup`, { method: 'POST' })
+          .catch(() => {})
+      ));
+      // 顺手清掉本地 ownedIds，避免下次启动又发起重复 cleanup
+      forgetOwnedTasks(Array.from(state.ownedTaskIds));
+    } catch (e) {
+      console.warn('cleanupAllServerTasks failed:', e);
+    }
+  }
+
   async function cleanupOwnedTasksConfirmed(taskIds = Array.from(state.ownedTaskIds)) {
     const ids = taskIds.filter(Boolean);
     if (!ids.length) return true;
@@ -1099,14 +1126,25 @@
     return true;
   }
   function cleanupOwnedTasksBeacon() {
-    const ids = Array.from(state.ownedTaskIds);
-    if (!ids.length || !navigator.sendBeacon) return;
-    // 后端没有 /api/cleanup_batch；逐个通过 sendBeacon 触发清理（即使页面已关闭，Beacon 也通常能送达）。
-    ids.forEach((tid) => {
-      try {
-        navigator.sendBeacon(`${state.apiBase}/api/tasks/${encodeURIComponent(tid)}/cleanup`);
-      } catch {}
+    // 用户要求：刷新 / 关 tab / 关浏览器时，把后端所有任务的商品结果全部清空，
+    // 不再只清当前会话创建的那几条。
+    const base = state.apiBase;
+    if (!navigator.sendBeacon) return;
+    // 先尝试清空 ownedIds 里的（兼容旧路径）
+    Array.from(state.ownedTaskIds).forEach((tid) => {
+      try { navigator.sendBeacon(`${base}/api/tasks/${encodeURIComponent(tid)}/cleanup`); } catch {}
     });
+    // 异步拉一次最新任务列表并对每个发 beacon（不阻塞卸载）
+    try {
+      fetch(`${base}/api/tasks`).then((r) => r.ok ? r.json() : null).then((j) => {
+        const tasks = (j && j.tasks) || [];
+        tasks.forEach((t) => {
+          const tid = t.task_id || t.taskId;
+          if (!tid) return;
+          try { navigator.sendBeacon(`${base}/api/tasks/${encodeURIComponent(tid)}/cleanup`); } catch {}
+        });
+      }).catch(() => {});
+    } catch {}
   }
   function setupLifecycle() {
     // 退出时尽力发送 Beacon；不移除本地 ID，下次加载会再次确认删除。
@@ -1139,7 +1177,8 @@
     _step('loadMoreFilesBtn', () => on($('#loadMoreFilesBtn'), 'click', () => { state.fileRenderCount += FILE_RENDER_BATCH; renderFileList(); }));
     state.fileRenderCount = FILE_RENDER_BATCH;
     console.log('[init] all bindings done');
-    try { await cleanupOwnedTasksConfirmed(); } catch (e) { console.warn('startup cleanup failed:', e); }
+    // 用户要求：每次启动 / 刷新都把后端所有任务的商品清空（不留任何历史）。
+    try { await cleanupAllServerTasks(); } catch (e) { console.warn('startup cleanup failed:', e); }
     loadTaskHistory();
     // 默认使用线上后端，设置弹窗仍允许手动覆盖。
   }
