@@ -1,1848 +1,1002 @@
-/* ============================================
-   1688 图搜批量寻源 - 前端交互逻辑
-   支持三种上传方式 + 列表式结果展示
-   ============================================ */
+/**
+ * 1688 批量图搜 · 前端交互逻辑
+ * 适配参考页面（OZON 图搜）的所有交互规则：
+ *   - 三种上传方式（文件 / URL / 表格）
+ *   - 进度轮询、结果分页、相似度排序、详情弹窗
+ *   - 后端 API 协议保持一致（/api/upload, /api/upload_urls, /api/search/:id, /api/status/:id, /api/results/:id, /api/tasks, /uploads/:id/:file）
+ */
 
 (function () {
   'use strict';
 
-  // ====== API 配置 ======
+  // ============== 配置 ==============
   const DEFAULT_API_BASE = 'https://yidong.dianleida.net:22000';
   const LEGACY_API_BASES = new Set([
-    'https://substantially-removed-think-dublin.trycloudflare.com',
-    'https://corporate-thousand-cool-fixes.trycloudflare.com',
-    'https://homework-jvc-terms-funky.trycloudflare.com',
-    'https://',
+    'http://localhost:5443',
+    'https://localhost:5443',
+    'https://localhost:5443/api/tasks',
     'https://192.168.1.35:5443',
-    'https://e216772.r5.cpolar.top',
-    'https://suites-traditional-bay-pushing.trycloudflare.com',
-    'https://macintosh-executives-til-performer.trycloudflare.com',
-    'https://cdt-registry-proudly-individuals.trycloudflare.com',
-    'https://farm-leads-discusses-generating.trycloudflare.com',
-    'https://quilt-discounts-golf-upgrades.trycloudflare.com',
-    'https://generator-context-terrorism-junior.trycloudflare.com',
-    'https://anyone-wages-plots-losses.trycloudflare.com',
-    'https://kiss-impressed-prevention-buffalo.trycloudflare.com',
+    'https://yidong.dianleida.net:21999',
   ]);
-  const getApiBase = () => {
-    const saved = localStorage.getItem('apiBase');
-    if (!saved || LEGACY_API_BASES.has(saved)) {
-      if (saved) localStorage.setItem('apiBase', DEFAULT_API_BASE);
-      return DEFAULT_API_BASE;
-    }
-    return saved;
-  };
-  const setApiBase = (url) => {
-    if (url) {
-      localStorage.setItem('apiBase', url.replace(/\/$/, ''));
-    } else {
-      localStorage.removeItem('apiBase');
-    }
-  };
-  const api = (path) => getApiBase() + path;
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+  const CHUNK_SIZE = 100;
+  const FREIGHT_BATCH_SIZE = 5;
+  const FILE_RENDER_BATCH = 30;
+  const POLL_INTERVAL = 2000;
+  const CLEANUP_STORAGE_KEY = 'pendingCleanupTaskIds';
 
-  function createRequestId(prefix = 'req') {
-    const randomPart = window.crypto?.randomUUID
-      ? window.crypto.randomUUID().replace(/-/g, '')
-      : Math.random().toString(36).slice(2) + Date.now().toString(36);
-    return `${prefix}_${randomPart}`;
-  }
-
-  async function fetchWithRetry(path, options = {}, retryOptions = {}) {
-    const {
-      attempts = 3,
-      timeoutMs = 180000,
-      stage = '请求',
-      onRetry = null,
-    } = retryOptions;
-    const url = api(path);
-    let lastError = null;
-
-    for (let attempt = 1; attempt <= attempts; attempt++) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-      try {
-        const response = await fetch(url, {...options, signal: controller.signal});
-        clearTimeout(timeoutId);
-        if (response.ok || (response.status < 500 && response.status !== 429)) {
-          return response;
-        }
-        lastError = new Error(`${stage}暂时不可用（HTTP ${response.status}）`);
-      } catch (error) {
-        clearTimeout(timeoutId);
-        lastError = error;
-      }
-
-      if (attempt < attempts) {
-        const delayMs = 1000 * (2 ** (attempt - 1));
-        console.warn(`${stage}失败，第 ${attempt}/${attempts} 次，${delayMs / 1000} 秒后重试`, lastError);
-        if (onRetry) onRetry(attempt, attempts, delayMs, lastError);
-        await sleep(delayMs);
-      }
-    }
-
-    if (lastError?.name === 'AbortError') {
-      throw new Error(`${stage}超时（${url}），已自动重试 ${attempts} 次`);
-    }
-    throw new Error(`${stage}连接失败（${url}），已自动重试 ${attempts} 次：${lastError?.message || 'Failed to fetch'}`);
-  }
-
-  // 列表行中最多直接展示的商品数，超出则点"查看更多"
-  const ROW_PREVIEW_LIMIT = 5;
-  // 预览网格懒加载：初始渲染数量和每次增量
-  const PREVIEW_INITIAL = 30;
-  const PREVIEW_INCREMENT = 30;
-
-  // ====== 全局状态 ======
-  const state = {
-    currentTab: 'link',    // batch | link | table
-    files: [],             // 批量上传：已选择的文件列表
-    tableFiles: [],        // 表格上传：每行的文件（按行号索引）
-    tableRows: 0,          // 表格当前行数
-    taskId: null,
-    cleanupSentTaskId: null,
-    pollingTimer: null,
-    elapsedTimer: null,
-    searchStartedAt: null,
-    results: null,
-    showAllResults: false,  // 是否显示全部结果（虚拟滚动）
-    pollInterval: 2000,     // 动态轮询间隔
-    // 懒加载渲染计数
-    fileVisibleCount: PREVIEW_INITIAL,
-    urlVisibleCount: PREVIEW_INITIAL,
-    // 分页状态（后端分页）
-    pagination: {
-      currentPage: 1,
-      pageSize: 20,
-      totalItems: 0,
-      imageNames: [],
-      loading: false,
-    },
-  };
-
-  // ====== DOM 元素 ======
-  const el = {
-    // Tab
-    uploadTabs: document.getElementById('uploadTabs'),
-    panelBatch: document.getElementById('panel-batch'),
-    panelLink: document.getElementById('panel-link'),
-    panelTable: document.getElementById('panel-table'),
-
-    // 批量上传
-    dropZone: document.getElementById('dropZone'),
-    fileInput: document.getElementById('fileInput'),
-    fileList: document.getElementById('fileList'),
-    fileGrid: document.getElementById('fileGrid'),
-    fileCount: document.getElementById('fileCount'),
-
-    // 链接上传
-    urlTextarea: document.getElementById('urlTextarea'),
-    urlFileInput: document.getElementById('urlFileInput'),
-    clearUrlBtn: document.getElementById('clearUrlBtn'),
-    previewUrlBtn: document.getElementById('previewUrlBtn'),
-    urlPreview: document.getElementById('urlPreview'),
-    urlCount: document.getElementById('urlCount'),
-    urlGrid: document.getElementById('urlGrid'),
-
-    // 表格上传 (ozon 风格)
-    tableFileInput: document.getElementById('tableFileInput'),
-    tableFileInfo: document.getElementById('tableFileInfo'),
-    tableFileName: document.getElementById('tableFileName'),
-    tableUrlCount: document.getElementById('tableUrlCount'),
-    previewTableBtn: document.getElementById('previewTableBtn'),
-    clearTableBtn: document.getElementById('clearTableBtn'),
-    tableUrlTextarea: document.getElementById('tableUrlTextarea'),
-    refreshTableUrlsBtn: document.getElementById('refreshTableUrlsBtn'),
-    tablePreview: document.getElementById('tablePreview'),
-    tableGrid: document.getElementById('tableGrid'),
-    // 悬浮分页条
-    resultPager: document.getElementById('resultPager'),
-    pagerSentinel: document.getElementById('pagerSentinel'),
-    pagerInfo: document.getElementById('pagerInfo'),
-    pagerPages: document.getElementById('pagerPages'),
-    pagerSizeInput: document.getElementById('pagerSizeInput'),
-    pagerPrev: document.getElementById('pagerPrev'),
-    pagerNext: document.getElementById('pagerNext'),
-    pagerTop: document.getElementById('pagerTop'),
-    pagerMessage: document.getElementById('pagerMessage'),
-
-
-    // 公共按钮
-    clearBtn: document.getElementById('clearBtn'),
-    searchBtn: document.getElementById('searchBtn'),
-
-    // API notice
-    apiNotice: document.getElementById('apiNotice'),
-    noticeClose: document.getElementById('noticeClose'),
-    // 进度
-    progressSection: document.getElementById('progress-section'),
-    progressStatus: document.getElementById('progressStatus'),
-    progressFill: document.getElementById('progressFill'),
-    progressCurrent: document.getElementById('progressCurrent'),
-    progressTotal: document.getElementById('progressTotal'),
-    progressPercent: document.getElementById('progressPercent'),
-    currentImage: document.getElementById('currentImage'),
-    foundProducts: document.getElementById('foundProducts'),
-    elapsedTime: document.getElementById('elapsedTime'),
-    estimatedTime: document.getElementById('estimatedTime'),
-    imageStatusSection: document.getElementById('imageStatusSection'),
-    imageStatusSummary: document.getElementById('imageStatusSummary'),
-    imageStatusList: document.getElementById('imageStatusList'),
-    cancelBtn: document.getElementById('cancelBtn'),
-    exportExcelBtn: document.getElementById('exportExcelBtn'),
-    // 进度 stage
-    progressStage: document.getElementById('progressStage'),
-    downloadProgressFill: document.getElementById('downloadProgressFill'),
-    searchProgressFill: document.getElementById('searchProgressFill'),
-    downloadProgressText: document.getElementById('downloadProgressText'),
-    searchProgressText: document.getElementById('searchProgressText'),
-    currentImageWrap: document.getElementById('currentImageWrap'),
-    currentImageName: document.getElementById('currentImageName'),
-
-    // 结果
-    resultSection: document.getElementById('result-section'),
-    resultSubtitle: document.getElementById('resultSubtitle'),
-    statsRow: document.getElementById('statsRow'),
-    resultList: document.getElementById('resultList'),
-    exportJsonBtn: document.getElementById('exportJsonBtn'),
-    newSearchBtn: document.getElementById('newSearchBtn'),
-
-    // 查看更多弹窗
-    resultModal: document.getElementById('resultModal'),
-    resultModalOverlay: document.getElementById('resultModalOverlay'),
-    resultModalClose: document.getElementById('resultModalClose'),
-    resultModalThumb: document.getElementById('resultModalThumb'),
-    resultModalTitle: document.getElementById('resultModalTitle'),
-    resultModalSub: document.getElementById('resultModalSub'),
-    resultModalGrid: document.getElementById('resultModalGrid') || document.getElementById('resultModalBody'),
-
-    // 任务记录
-    historyList: document.getElementById('historyList'),
-    historyEmpty: document.getElementById('historyEmpty'),
-    refreshHistoryBtn: document.getElementById('refreshHistoryBtn'),
-    // 设置
-    settingsBtn: document.getElementById('settingsBtn'),
-    settingsModal: document.getElementById('settingsModal'),
-    settingsOverlay: document.getElementById('settingsOverlay'),
-    settingsClose: document.getElementById('settingsClose'),
-    settingsCancel: document.getElementById('settingsCancel'),
-    settingsSave: document.getElementById('settingsSave'),
-    apiBaseInput: document.getElementById('apiBaseInput'),
-    connectionStatus: document.getElementById('connectionStatus'),
-
-    // 上传耗时 & 分页
-    uploadTiming: document.getElementById('uploadTiming'),
-    uploadTimingValue: document.getElementById('uploadTimingValue'),
-    paginationWrap: document.getElementById('paginationWrap'),
-    paginationInfo: document.getElementById('paginationInfo'),
-    pageCurrentNum: document.getElementById('pageCurrentNum'),
-    pageTotalNum: document.getElementById('pageTotalNum'),
-    pageFirst: document.getElementById('pageFirst'),
-    pagePrev: document.getElementById('pagePrev'),
-    pageNext: document.getElementById('pageNext'),
-    pageLast: document.getElementById('pageLast'),
-    pageJumpInput: document.getElementById('pageJumpInput'),
-    pageJumpBtn: document.getElementById('pageJumpBtn'),
-    pageSizeSelect: document.getElementById('pageSizeSelect'),
-  };
-
-  // ====== 初始化 ======
-  function init() {
-    setupTabs();
-    setupDragAndDrop();
-    setupFileInput();
-    setupUrlUpload();
-    setupTableLinksInput();
-    setupButtons();
-    setupSettings();
-    setupHistory();
-    setupResultModal();
-    setupPagination();
-    setupLifecycleCleanup();
-    updateButtons();
-  }
-
-  // ====== Page lifecycle cleanup ======
-  function cleanupCurrentTask() {
-    const taskId = state.taskId;
-    if (!taskId || state.cleanupSentTaskId === taskId) return;
-
-    state.cleanupSentTaskId = taskId;
-    const url = api(`/api/tasks/${encodeURIComponent(taskId)}/cleanup`);
-    const body = JSON.stringify({ task_id: taskId });
-    const blob = new Blob([body], { type: 'application/json' });
-
+  function readPendingCleanupIds() {
     try {
-      if (navigator.sendBeacon && navigator.sendBeacon(url, blob)) return;
-    } catch (error) {
-      console.warn('Task cleanup Beacon failed:', error);
+      return new Set(JSON.parse(localStorage.getItem(CLEANUP_STORAGE_KEY) || '[]'));
+    } catch {
+      return new Set();
     }
-
-    fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body,
-      keepalive: true,
-    }).catch(error => console.warn('Task cleanup request failed:', error));
   }
 
-  function setupLifecycleCleanup() {
-    window.addEventListener('pagehide', (event) => {
-      if (event.persisted === true) return;
-      cleanupCurrentTask();
+  // ============== 状态 ==============
+  const state = {
+    apiBase: DEFAULT_API_BASE,
+    activeTab: 'link',
+    files: [],           // { id, name, dataUrl, status }
+    urls: [],            // { url, dataUrl, status }
+    tableRows: [],       // [{ name, dataUrl, status }]
+    fileRenderCount: 0,
+    taskId: null,
+    pollTimer: null,
+    pollStartedAt: 0,
+    lastProgress: null,
+    results: {},
+    pagination: { currentPage: 1, pageSize: 50, totalItems: 0, imageNames: [] },
+    cleanupSentTaskId: null,
+    // 持久保存待清理任务；若浏览器退出时 Beacon 未送达，下次加载会补偿删除。
+    ownedTaskIds: readPendingCleanupIds(),
+    isSearching: false,
+    elapsedTimer: null,
+  };
+
+  // ============== DOM 工具 ==============
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const on = (el, ev, fn) => el && el.addEventListener(ev, fn);
+  const h = (tag, attrs = {}, ...children) => {
+    const el = document.createElement(tag);
+    for (const k in attrs) {
+      if (k === 'class') el.className = attrs[k];
+      else if (k === 'html') el.innerHTML = attrs[k];
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2).toLowerCase(), attrs[k]);
+      else el.setAttribute(k, attrs[k]);
+    }
+    children.flat().forEach((c) => {
+      if (c == null) return;
+      el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
     });
+    return el;
+  };
+  const fmtTime = (sec) => {
+    if (!isFinite(sec) || sec < 0) return '-';
+    sec = Math.round(sec);
+    if (sec < 60) return `${sec}秒`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (m < 60) return `${m}分${s}秒`;
+    const hh = Math.floor(m / 60);
+    return `${hh}时${m % 60}分`;
+  };
+  const fmtClock = (sec) => {
+    sec = Math.max(0, Math.round(sec));
+    const m = String(Math.floor(sec / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // ============== API Base ==============
+  function getApiBase() {
+    let base = localStorage.getItem('apiBase');
+    if (LEGACY_API_BASES.has(base)) base = DEFAULT_API_BASE;
+    if (!base) base = DEFAULT_API_BASE;
+    return base.replace(/\/+$/, '');
   }
-  // ====== Tab 切换 ======
-  function setupTabs() {
-    if (!el.uploadTabs) return;
-    el.uploadTabs.addEventListener('click', (e) => {
-      const tab = e.target.closest('.upload-tab');
-      if (!tab) return;
-      const tabName = tab.dataset.tab;
-      switchTab(tabName);
-    });
-  }
-
-  function switchTab(tabName) {
-    state.currentTab = tabName;
-    // 切换按钮高亮
-    el.uploadTabs.querySelectorAll('.upload-tab').forEach(btn => {
-      btn.classList.toggle('active', btn.dataset.tab === tabName);
-    });
-    // 切换面板
-    el.panelBatch.classList.toggle('active', tabName === 'batch');
-    el.panelLink.classList.toggle('active', tabName === 'link');
-    el.panelTable.classList.toggle('active', tabName === 'table');
-    updateButtons();
-  }
-
-  // ====== 拖拽上传（批量方式） ======
-  function setupDragAndDrop() {
-    const dropZone = el.dropZone;
-    if (!dropZone) return;
-
-    dropZone.addEventListener('click', () => {
-      el.fileInput.click();
-    });
-
-    dropZone.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      dropZone.classList.add('dragover');
-    });
-
-    dropZone.addEventListener('dragleave', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-    });
-
-    dropZone.addEventListener('drop', (e) => {
-      e.preventDefault();
-      dropZone.classList.remove('dragover');
-      const files = Array.from(e.dataTransfer.files).filter(f =>
-        f.type.startsWith('image/')
-      );
-      if (files.length > 0) {
-        addFiles(files);
-      }
-    });
-  }
-
-  function setupFileInput() {
-    el.fileInput.addEventListener('change', (e) => {
-      const files = Array.from(e.target.files);
-      if (files.length > 0) {
-        addFiles(files);
-      }
-      el.fileInput.value = '';
-    });
+  function setApiBase(v) {
+    localStorage.setItem('apiBase', v);
+    state.apiBase = v.replace(/\/+$/, '');
   }
 
-  function addFiles(newFiles) {
-    for (const file of newFiles) {
-      const exists = state.files.some(f => f.name === file.name && f.size === file.size);
-      if (!exists) {
-        state.files.push(file);
+  // ============== fetch with retry ==============
+  async function fetchWithRetry(url, opts = {}, retries = 3) {
+    let lastErr;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), 600000);
+        const res = await fetch(url, { ...opts, signal: ctrl.signal });
+        clearTimeout(t);
+        if (!res.ok) {
+          const body = await res.text().catch(() => '');
+          throw new Error(`HTTP ${res.status}: ${body.slice(0, 200)}`);
+        }
+        return res;
+      } catch (e) {
+        lastErr = e;
+        if (i < retries - 1) await new Promise((r) => setTimeout(r, 1000 * Math.pow(2, i)));
       }
     }
-    state.fileVisibleCount = PREVIEW_INITIAL;
-    renderFileList();
-    updateButtons();
+    throw lastErr;
   }
 
-  function removeFile(index) {
-    state.files.splice(index, 1);
-    renderFileList();
-    updateButtons();
+  // ============== Tabs ==============
+  function switchTab(name) {
+    state.activeTab = name;
+    $$('.upload-tab').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
+    $$('.upload-panel').forEach((p) => p.classList.toggle('active', p.id === `panel-${name}`));
+    updateSearchBtn();
   }
 
-  function clearFiles() {
-    state.files = [];
-    state.fileVisibleCount = PREVIEW_INITIAL;
-    renderFileList();
-    updateButtons();
+  // ============== File Upload (Batch) ==============
+  function setupBatchUpload() {
+    const dropZone = $('#dropZone');
+    const fileInput = $('#fileInput');
+    on(dropZone, 'click', () => fileInput.click());
+    on(fileInput, 'change', (e) => handleFiles(e.target.files));
+    ['dragover', 'dragenter'].forEach((ev) =>
+      on(dropZone, ev, (e) => { e.preventDefault(); dropZone.classList.add('dragover'); })
+    );
+    ['dragleave', 'drop'].forEach((ev) =>
+      on(dropZone, ev, (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); })
+    );
+    on(dropZone, 'drop', (e) => {
+      const fs = Array.from(e.dataTransfer.files).filter((f) => f.type.startsWith('image/'));
+      handleFiles(fs);
+    });
+    on($('#loadMoreFilesBtn'), 'click', () => {
+      state.fileRenderCount = Math.min(state.fileRenderCount + FILE_RENDER_BATCH, state.files.length);
+      renderFileList();
+    });
+  }
+
+  function handleFiles(fileList) {
+    const arr = Array.from(fileList);
+    const seen = new Set(state.files.map((f) => f.name + f.size));
+    arr.forEach((f) => {
+      if (!f.type.startsWith('image/')) return;
+      if (seen.has(f.name + f.size)) return;
+      seen.add(f.name + f.size);
+      const id = crypto.randomUUID();
+      const item = { id, name: f.name, size: f.size, file: f, dataUrl: null };
+      state.files.push(item);
+      const reader = new FileReader();
+      reader.onload = () => {
+        item.dataUrl = reader.result;
+        // 上传后直接渲染缩略图
+        state.fileRenderCount = state.files.length;
+        renderFileList();
+        updateSearchBtn();
+      };
+      reader.readAsDataURL(f);
+    });
   }
 
   function renderFileList() {
-    if (state.files.length === 0) {
-      el.fileList.style.display = 'none';
-      return;
-    }
-    el.fileList.style.display = 'block';
-    if (el.fileCount) el.fileCount.textContent = `${state.files.length} 张`;
-    el.fileGrid.innerHTML = '';
-
-    // 懒加载：只渲染前 fileVisibleCount 个
-    const visible = state.files.slice(0, state.fileVisibleCount);
-    visible.forEach((file, index) => {
-      const item = document.createElement('div');
-      item.className = 'file-item';
-
-      const img = document.createElement('img');
-      img.alt = file.name;
-      img.loading = 'lazy';
-      const reader = new FileReader();
-      reader.onload = (e) => { img.src = e.target.result; };
-      reader.readAsDataURL(file);
-
-      const name = document.createElement('div');
-      name.className = 'file-item-name';
-      name.textContent = file.name;
-
-      const removeBtn = document.createElement('div');
-      removeBtn.className = 'file-item-remove';
-      removeBtn.innerHTML = '×';
-      removeBtn.title = '移除';
-      removeBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        removeFile(index);
-      });
-
-      item.appendChild(img);
-      item.appendChild(name);
-      item.appendChild(removeBtn);
-      el.fileGrid.appendChild(item);
-    });
-
-    // 如果还有更多未渲染的，显示"加载更多"按钮
-    if (state.fileVisibleCount < state.files.length) {
-      const loadMore = document.createElement('div');
-      loadMore.className = 'load-more-btn';
-      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.fileVisibleCount} / ${state.files.length}）</span>`;
-      loadMore.addEventListener('click', () => {
-        state.fileVisibleCount += PREVIEW_INCREMENT;
-        renderFileList();
-      });
-      el.fileGrid.appendChild(loadMore);
+    const grid = $('#fileGrid');
+    grid.innerHTML = '';
+    const total = state.files.length;
+    const shown = Math.min(state.fileRenderCount, total);
+    $('#fileCount').textContent = `${total} 张`;
+    $('#fileList').hidden = total === 0;
+    state.files.slice(0, shown).forEach((f, idx) => grid.appendChild(buildFileItem(f, idx, () => {
+      state.files.splice(idx, 1);
+      state.fileRenderCount = Math.min(state.fileRenderCount, state.files.length);
+      renderFileList();
+      updateSearchBtn();
+    })));
+    if (total > shown) {
+      $('#fileListMore').hidden = false;
+      $('#fileShown').textContent = shown;
+      $('#fileTotal').textContent = total;
+    } else {
+      $('#fileListMore').hidden = true;
     }
   }
 
-  // ====== 链接上传 ======
-  function setupUrlUpload() {
-    el.clearUrlBtn.addEventListener('click', () => {
-      el.urlTextarea.value = '';
-      el.urlPreview.style.display = 'none';
-      el.urlGrid.innerHTML = '';
-      state.urlVisibleCount = PREVIEW_INITIAL;
-      updateButtons();
-    });
-
-    el.previewUrlBtn.addEventListener('click', previewUrls);
-
-    el.urlFileInput.addEventListener('change', (e) => {
-      const file = e.target.files[0];
-      if (!file) return;
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        el.urlTextarea.value = ev.target.result;
-        previewUrls();
-      };
-      reader.readAsText(file);
-      el.urlFileInput.value = '';
-    });
-
-    // 输入时实时更新计数
-    el.urlTextarea.addEventListener('input', () => {
-      const urls = parseUrls();
-      if (urls.length === 0) {
-        el.urlPreview.style.display = 'none';
-      }
-      updateButtons();
-    });
+  function buildFileItem(f, idx, onRemove) {
+    const el = h('div', { class: 'file-item' });
+    if (f.dataUrl) el.appendChild(h('img', { src: f.dataUrl, alt: f.name }));
+    el.appendChild(h('div', { class: 'file-item-name', title: f.name }, f.name));
+    const rm = h('button', { class: 'file-item-remove', 'aria-label': '移除' }, '×');
+    on(rm, 'click', (e) => { e.stopPropagation(); onRemove(); });
+    el.appendChild(rm);
+    return el;
   }
 
+  // ============== URL Panel ==============
+  function setupUrlPanel() {
+    const ta = $('#urlTextarea');
+    const fileInput = $('#urlFileInput');
+    on(ta, 'input', () => { clearTimeout(state._urlTimer); state._urlTimer = setTimeout(parseUrls, 300); });
+    on(ta, 'paste', () => { clearTimeout(state._urlTimer); state._urlTimer = setTimeout(parseUrls, 100); });
+    on(fileInput, 'change', async (e) => {
+      const f = e.target.files[0];
+      if (!f) return;
+      const text = await f.text();
+      ta.value = text;
+      parseUrls();
+    });
+    on($('#clearUrlBtn'), 'click', () => { ta.value = ''; state.urls = []; $('#urlPreview').hidden = true; parseUrls(); });
+    on($('#previewUrlBtn'), 'click', () => { parseUrls(); renderUrlGrid(); $('#urlPreview').hidden = state.urls.length === 0; });
+  }
+
+  // 解析 URL，只更新 state 和按钮状态，不渲染图片
   function parseUrls() {
-    const text = el.urlTextarea.value.trim();
-    if (!text) return [];
-    return text.split(/\r?\n/).map(s => s.trim()).filter(s => s && /^https?:\/\//i.test(s));
+    const lines = $('#urlTextarea').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+    const valid = lines.filter((u) => /^https?:\/\//i.test(u));
+    state.urls = valid.map((url) => ({ url, status: 'pending' }));
+    $('#urlCount').textContent = `${valid.length} 条`;
+    updateSearchBtn();
   }
 
+  // 预览 URL 图片网格（仅用户点"预览链接"时调用）
   function previewUrls() {
-    const urls = parseUrls();
-    if (urls.length === 0) {
-      el.urlPreview.style.display = 'none';
-      alert('未检测到有效的图片链接（需以 http:// 或 https:// 开头）');
-      return;
-    }
-    el.urlPreview.style.display = 'block';
-    if (el.urlCount) el.urlCount.textContent = `${urls.length} 条`;
-    el.urlGrid.innerHTML = '';
-    state.urlVisibleCount = PREVIEW_INITIAL;
-
-    // 懒加载：只渲染前 urlVisibleCount 个
-    const visible = urls.slice(0, state.urlVisibleCount);
-    visible.forEach((url, idx) => {
-      const item = createUrlPreviewItem(url, idx, urls);
-      el.urlGrid.appendChild(item);
+    parseUrls();
+    renderUrlGrid();
+    $('#urlPreview').hidden = state.urls.length === 0;
+  }
+  function renderUrlGrid() {
+    const grid = $('#urlGrid');
+    grid.innerHTML = '';
+    state.urls.forEach((u, idx) => {
+      const el = h('div', { class: 'file-item' });
+      el.appendChild(h('img', { src: u.url, alt: u.url, loading: 'lazy' }));
+      el.appendChild(h('div', { class: 'file-item-name', title: u.url }, u.url.slice(0, 40) + (u.url.length > 40 ? '…' : '')));
+      const rm = h('button', { class: 'file-item-remove' }, '×');
+      on(rm, 'click', (e) => { e.stopPropagation(); state.urls.splice(idx, 1); renderUrlGrid(); previewUrls(); });
+      el.appendChild(rm);
+      grid.appendChild(el);
     });
-
-    // 如果还有更多未渲染的，显示"加载更多"按钮
-    if (state.urlVisibleCount < urls.length) {
-      const loadMore = document.createElement('div');
-      loadMore.className = 'load-more-btn';
-      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
-      loadMore.addEventListener('click', () => {
-        state.urlVisibleCount += PREVIEW_INCREMENT;
-        previewUrlsAppend(urls);
-      });
-      el.urlGrid.appendChild(loadMore);
-    }
-
-    updateButtons();
   }
 
-  // 追加渲染更多URL预览项（不重建已有的）
-  function previewUrlsAppend(urls) {
-    // 移除旧的"加载更多"按钮
-    const oldBtn = el.urlGrid.querySelector('.load-more-btn');
-    if (oldBtn) oldBtn.remove();
-
-    const startIdx = state.urlVisibleCount - PREVIEW_INCREMENT;
-    const endIdx = Math.min(state.urlVisibleCount, urls.length);
-    for (let idx = startIdx; idx < endIdx; idx++) {
-      const item = createUrlPreviewItem(urls[idx], idx, urls);
-      el.urlGrid.appendChild(item);
-    }
-
-    if (state.urlVisibleCount < urls.length) {
-      const loadMore = document.createElement('div');
-      loadMore.className = 'load-more-btn';
-      loadMore.innerHTML = `<span>加载更多</span><span class="load-more-count">（已显示 ${state.urlVisibleCount} / ${urls.length}）</span>`;
-      loadMore.addEventListener('click', () => {
-        state.urlVisibleCount += PREVIEW_INCREMENT;
-        previewUrlsAppend(urls);
-      });
-      el.urlGrid.appendChild(loadMore);
-    }
-  }
-
-  // 创建单个URL预览项
-  function createUrlPreviewItem(url, idx, allUrls) {
-    const item = document.createElement('div');
-    item.className = 'file-item url-item';
-    const img = document.createElement('img');
-    img.alt = `链接 ${idx + 1}`;
-    img.src = url;
-    img.loading = 'lazy';
-    img.onerror = () => {
-      img.style.display = 'none';
-      const fallback = document.createElement('div');
-      fallback.className = 'url-fallback';
-      fallback.textContent = '❌';
-      item.insertBefore(fallback, item.firstChild);
-    };
-    const name = document.createElement('div');
-    name.className = 'file-item-name';
-    try {
-      const u = new URL(url);
-      name.textContent = `${u.host}${u.pathname.slice(0, 30)}`;
-    } catch {
-      name.textContent = url.slice(0, 40);
-    }
-    const removeBtn = document.createElement('div');
-    removeBtn.className = 'file-item-remove';
-    removeBtn.innerHTML = '×';
-    removeBtn.title = '移除该链接';
-    removeBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const lines = el.urlTextarea.value.split(/\r?\n/).filter(s => s.trim() && s.trim() !== url);
-      el.urlTextarea.value = lines.join('\n');
-      previewUrls();
+  // ============== Table Panel (Excel/CSV 上传) ==============
+  function setupTablePanel() {
+    const dropZone = $('#tableDropZone');
+    const fileInput = $('#tableFileInput');
+    on(dropZone, 'click', () => fileInput.click());
+    on(fileInput, 'change', (e) => { const f = e.target.files[0]; if (f) handleTableFile(f); });
+    ['dragover', 'dragenter'].forEach((ev) => on(dropZone, ev, (e) => { e.preventDefault(); dropZone.classList.add('dragover'); }));
+    ['dragleave', 'drop'].forEach((ev) => on(dropZone, ev, (e) => { e.preventDefault(); dropZone.classList.remove('dragover'); }));
+    on(dropZone, 'drop', (e) => {
+      const f = Array.from(e.dataTransfer.files).find((x) => /\.(xlsx|xls|csv)$/i.test(x.name));
+      if (f) handleTableFile(f);
     });
-
-    item.appendChild(img);
-    item.appendChild(name);
-    item.appendChild(removeBtn);
-    return item;
-  }
-
-  // ====== 表格上传 (legacy 更新计数, 兼容旧调用) ======
-  function updateTableCount() {
-    renderTableLinksMeta();
-  }
-
-  // ====== 更新按钮状态 ======
-  function updateButtons() {
-    const hasFiles = getCurrentFileCount() > 0;
-    el.clearBtn.style.display = hasFiles ? 'inline-flex' : 'none';
-    el.searchBtn.style.display = 'inline-flex';
-    el.searchBtn.disabled = !hasFiles;
-  }
-
-  function getCurrentFileCount() {
-    if (state.currentTab === 'batch') return state.files.length;
-    if (state.currentTab === 'link') return parseUrls().length;
-    if (state.currentTab === 'table') return parseTableLinks().length;
-    return 0;
-  }
-
-  // ====== 按钮事件 ======
-  function setupButtons() {
-    el.clearBtn.addEventListener('click', () => {
-      if (state.currentTab === 'batch') clearFiles();
-      else if (state.currentTab === 'link') {
-        el.urlTextarea.value = '';
-        el.urlPreview.style.display = 'none';
-        el.urlGrid.innerHTML = '';
-        state.urlVisibleCount = PREVIEW_INITIAL;
-        updateButtons();
-      } else if (state.currentTab === 'table') clearTableLinks();
+    on($('#clearTableBtn'), 'click', () => {
+      state.tableUrls = [];
+      $('#tableFileInfo').hidden = true;
+      $('#tablePreview').hidden = true;
+      $('#tableFileInput').value = '';
+      updateSearchBtn();
     });
-    el.searchBtn.addEventListener('click', startSearch);
-    el.exportJsonBtn.addEventListener('click', exportJson);
-    el.newSearchBtn.addEventListener('click', newSearch);
-  }
-
-  // ====== 开始搜索 ======
-  async function startSearch() {
-    if (getCurrentFileCount() === 0) {
-      if (state.currentTab === 'table') {
-        alert('请先上传表格文件, 或在文本框中粘贴图片链接');
-      } else {
-        alert('请先添加图片');
+    on($('#refreshTableUrlsBtn'), 'click', () => {
+      const lines = $('#tableUrlTextarea').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const valid = lines.filter((u) => /^https?:\/\//i.test(u));
+      state.tableUrls = valid.map((url) => ({ url, status: 'pending' }));
+      $('#tableUrlCount').textContent = `${valid.length} 条链接`;
+      // 如果预览区已打开，刷新预览
+      if (!$('#tablePreview').hidden) {
+        renderTableGrid();
       }
-      return;
-    }
+      updateSearchBtn();
+    });
+    on($('#previewTableBtn'), 'click', () => {
+      // 先确保数据是最新的（从 textarea 读取）
+      const lines = $('#tableUrlTextarea').value.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const valid = lines.filter((u) => /^https?:\/\//i.test(u));
+      state.tableUrls = valid.map((url) => ({ url, status: 'pending' }));
+      $('#tableUrlCount').textContent = `${valid.length} 条链接`;
+      renderTableGrid();
+      $('#tablePreview').hidden = state.tableUrls.length === 0;
+      updateSearchBtn();
+    });
+  }
 
-    const totalFiles = getCurrentFileCount();
-    el.searchBtn.disabled = true;
-
-    const uploadStartTime = Date.now();
-
+  // 解析 Excel/CSV 文件，提取所有单元格中的图片链接
+  async function handleTableFile(file) {
     try {
-      let uploadData;
+      const buf = await file.arrayBuffer();
+      const wb = typeof XLSX !== 'undefined' ? XLSX.read(buf, { type: 'array' }) : null;
 
-      if (state.currentTab === 'link' || state.currentTab === 'table') {
-        // 链接/表格方式：流水线并行（边下载边搜索）
-        const urls = state.currentTab === 'table' ? parseTableLinks() : parseUrls();
-        const totalUrls = urls.length;
-        const CHUNK_SIZE = 50; // 每批50个URL
-        const totalChunks = Math.ceil(totalUrls / CHUNK_SIZE);
-        let taskId = null;
-        let totalUploaded = 0;
-        let totalFailed = 0;
-        let allFailedFiles = [];
-        let streamingStarted = false;
+      let allText = '';
+      if (wb) {
+        // 遍历所有 sheet
+        for (const name of wb.SheetNames) {
+          const ws = wb.Sheets[name];
+          const csv = XLSX.utils.sheet_to_csv(ws);
+          allText += csv + '\n';
+        }
+      } else {
+        // 纯 CSV/文本：直接读
+        allText = new TextDecoder().decode(buf);
+      }
 
-        // 立即显示进度条（用户点击开始就看到）
-        showProgress();
-        updateProgress({
-          status: 'searching',
-          message: `正在下载 ${totalUrls} 张图片...`,
-          current: 0,
-          total: totalUrls,
-          downloaded_count: 0,
-          searched_count: 0,
-          is_streaming: true,
-        });
+      // 从所有文本中提取图片链接
+      const urlRegex = /https?:\/\/[^\s"',;|}\]]+\.(?:jpg|jpeg|png|webp|gif|bmp|tiff?)(?:\?[^\s"',;|}\]]*)?/gi;
+      const matches = allText.match(urlRegex) || [];
+      // 去重
+      const unique = [...new Set(matches.map((u) => u.trim()))];
 
-        // 上传第一批并启动流式搜索
-        const firstChunkUrls = urls.slice(0, CHUNK_SIZE);
-        const isFirstOnly = totalChunks === 1;
+      state.tableUrls = unique.map((url) => ({ url, status: 'pending' }));
 
-        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在下载 ${Math.min(CHUNK_SIZE, totalUrls)}/${totalUrls} 张并启动搜索...</span>`;
+      // 展示文件信息和识别到的链接
+      $('#tableFileInfo').hidden = false;
+      $('#tablePreview').hidden = true; // 默认不显示预览
+      $('#tableFileName').textContent = '📄 ' + file.name;
+      $('#tableUrlCount').textContent = `${unique.length} 条链接`;
+      const ta = $('#tableUrlTextarea');
+      ta.value = unique.join('\n');
+      ta.readOnly = false; // 允许用户编辑
 
-        const firstRequestId = createRequestId('first');
-        const firstRes = await fetchWithRetry('/api/upload_urls', {
+      updateSearchBtn();
+    } catch (e) {
+      alert('解析表格失败：' + e.message);
+    }
+  }
+
+  // 渲染表格面板预览网格
+  function renderTableGrid() {
+    const grid = $('#tableGrid');
+    grid.innerHTML = '';
+    (state.tableUrls || []).forEach((u, idx) => {
+      const el = h('div', { class: 'file-item' });
+      el.appendChild(h('img', { src: u.url, alt: u.url, loading: 'lazy' }));
+      el.appendChild(h('div', { class: 'file-item-name', title: u.url }, u.url.slice(0, 40) + (u.url.length > 40 ? '…' : '')));
+      const rm = h('button', { class: 'file-item-remove' }, '×');
+      on(rm, 'click', (e) => {
+        e.stopPropagation();
+        state.tableUrls.splice(idx, 1);
+        // 同步更新 textarea
+        $('#tableUrlTextarea').value = state.tableUrls.map((u) => u.url).join('\n');
+        $('#tableUrlCount').textContent = `${state.tableUrls.length} 条链接`;
+        renderTableGrid();
+        if (state.tableUrls.length === 0) {
+          $('#tablePreview').hidden = true;
+        }
+        updateSearchBtn();
+      });
+      el.appendChild(rm);
+      grid.appendChild(el);
+    });
+  }
+
+  // ============== Search Btn ==============
+  function getCurrentFileCount() {
+    if (state.activeTab === 'batch') return state.files.length;
+    if (state.activeTab === 'link')  return state.urls.length;
+    return (state.tableUrls || []).length;
+  }
+  function updateSearchBtn() {
+    $('#searchBtn').disabled = getCurrentFileCount() === 0 || state.isSearching;
+    // 清空按钮只在当前 tab 有数据时显示
+    $('#clearBtn').hidden = state.isSearching || getCurrentFileCount() === 0;
+  }
+
+  // ============== Search Flow ==============
+  // 逐批提交 URL：后端立即接收并后台下载。单批失败不中断，最后统一重试一轮。
+  async function submitUrlBatches(endpoint, allUrls) {
+    const failedBatches = [];
+    for (let i = 0; i < allUrls.length; i += CHUNK_SIZE) {
+      const batch = allUrls.slice(i, i + CHUNK_SIZE);
+      const isLast = i + batch.length >= allUrls.length;
+      try {
+        await fetchWithRetry(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            urls: firstChunkUrls,
-            auto_search: true,
-            expected_total: totalUrls,
-            is_last_batch: isFirstOnly,
-            request_id: firstRequestId,
-          }),
-        }, {
-          attempts: 3,
-          timeoutMs: 600000,  // 10分钟超时，支持大批量上传
-          stage: '首批图片上传与搜索启动',
-          onRetry: (attempt, attempts) => {
-            el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>连接中断，正在自动重试 ${attempt + 1}/${attempts}...</span>`;
-            updateProgress({
-              status: 'searching',
-              message: `连接暂时中断，正在重试首批任务 ${attempt + 1}/${attempts}...`,
-              current: 0,
-              total: totalUrls,
-              downloaded_count: 0,
-              searched_count: 0,
-              is_streaming: true,
-            });
-          },
-        });
-
-        const firstData = await firstRes.json();
-        if (!firstRes.ok) throw new Error(firstData.error || 'URL上传失败');
-
-        taskId = firstData.task_id;
-        totalUploaded = firstData.total_uploaded || firstData.uploaded_count;
-        totalFailed += firstData.failed_count || 0;
-        if (firstData.failed_files) allFailedFiles = allFailedFiles.concat(firstData.failed_files);
-        streamingStarted = firstData.is_streaming || firstData.status === 'searching';
-
-        state.taskId = taskId;
-        state.cleanupSentTaskId = null;
-
-        // 显示上传接口耗时（第一批完成，搜索已启动）
-        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-        el.uploadTiming.style.display = 'flex';
-        if (el.uploadTimingValue) el.uploadTimingValue.textContent = `${uploadDuration} 秒（第一批已启动搜索）`;
-
-        // 显示进度并开始轮询
-        showProgress();
-        updateProgress({
-          status: 'searching',
-          message: `边下载边搜索中... 已下载 ${totalUploaded}/${totalUrls} 张`,
-          current: firstData.searched_count || 0,
-          total: totalUrls,
-          downloaded_count: totalUploaded,
-          searched_count: firstData.searched_count || 0,
-          is_streaming: true,
-        });
-
-        startPolling();
-
-        // 后台继续上传剩余批次
-        if (totalChunks > 1) {
-          uploadRemainingChunks();
-        }
-
-        async function uploadRemainingChunks() {
-          for (let chunkIdx = 1; chunkIdx < totalChunks; chunkIdx++) {
-            const chunkStart = chunkIdx * CHUNK_SIZE;
-            const chunkEnd = Math.min(chunkStart + CHUNK_SIZE, totalUrls);
-            const chunkUrls = urls.slice(chunkStart, chunkEnd);
-            const isLast = chunkIdx === totalChunks - 1;
-
-            try {
-              const chunkRequestId = createRequestId(`chunk${chunkIdx + 1}`);
-              const res = await fetchWithRetry('/api/upload_urls', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  urls: chunkUrls,
-                  task_id: taskId,
-                  expected_total: totalUrls,
-                  is_last_batch: isLast,
-                  request_id: chunkRequestId,
-                }),
-              }, {
-                attempts: 3,
-                timeoutMs: 180000,
-                stage: `第 ${chunkIdx + 1}/${totalChunks} 批图片上传`,
-                onRetry: (attempt, attempts) => {
-                  updateProgress({
-                    status: 'searching',
-                    message: `第 ${chunkIdx + 1}/${totalChunks} 批连接中断，正在重试 ${attempt + 1}/${attempts}...`,
-                    current: 0,
-                    total: totalUrls,
-                    downloaded_count: totalUploaded,
-                    searched_count: 0,
-                    is_streaming: true,
-                  });
-                },
-              });
-
-              const chunkData = await res.json();
-              if (!res.ok) {
-                console.warn(`第${chunkIdx + 1}批上传失败:`, chunkData.error);
-                continue;
-              }
-
-              totalUploaded = chunkData.total_uploaded || totalUploaded + chunkData.uploaded_count;
-              totalFailed += chunkData.failed_count || 0;
-              if (chunkData.failed_files) allFailedFiles = allFailedFiles.concat(chunkData.failed_files);
-
-              console.log(`第${chunkIdx + 1}/${totalChunks}批上传完成，累计 ${totalUploaded} 张`);
-            } catch (err) {
-              console.warn(`第${chunkIdx + 1}批上传异常:`, err);
-            }
-          }
-          console.log(`全部批次上传完成，共成功 ${totalUploaded} 张，失败 ${totalFailed} 张`);
-        }
-
-        uploadData = {
-          task_id: taskId,
-          uploaded_count: totalUploaded,
-          failed_count: totalFailed,
-          failed_files: allFailedFiles,
-        };
-      } else {
-        // 批量 / 表格方式：调用 /api/upload
-        if (state.currentTab === 'table') {
-          // 表格上传走链接批量上传流程
-          const urls = parseTableLinks();
-          if (urls.length === 0) {
-            throw new Error('没有可搜索的链接');
-          }
-          await startLinkUpload(urls, uploadStartTime);
-          return;
-        }
-
-        // 批量上传（图片文件流）
-        const files = state.files;
-
-        // 立即显示进度条
-        showProgress();
-        updateProgress({
-          status: 'pending',
-          message: `正在上传 ${files.length} 张图片...`,
-          current: 0,
-          total: files.length,
-        });
-
-        el.searchBtn.innerHTML = `<span class="btn-icon">⏳</span><span>正在上传 ${files.length} 张图片...</span>`;
-        const formData = new FormData();
-        files.forEach(file => formData.append('files', file));
-
-        // 文件上传超时（10分钟）
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 600000);
-        const res = await fetch(api('/api/upload'), {
+          body: JSON.stringify({ urls: batch, auto_search: isLast, task_id: state.taskId, is_last_batch: isLast, expected_total: allUrls.length }),
+        }, 2);
+      } catch (e) {
+        console.warn('batch submit failed, will retry later:', e.message);
+        failedBatches.push({ batch, isLast });
+      }
+      const submitted = Math.min(i + batch.length, allUrls.length);
+      $('#progressStatus').textContent = `已提交 ${submitted}/${allUrls.length}，边下载边搜索`;
+    }
+    // 收尾重试一轮失败的批次；若仍失败则抛出让用户知道有图片未提交。
+    const stillFailed = [];
+    for (const { batch, isLast } of failedBatches) {
+      try {
+        await fetchWithRetry(endpoint, {
           method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        uploadData = await res.json();
-        if (!res.ok) throw new Error(uploadData.error || '上传失败');
-
-        // 显示上传接口耗时
-        const uploadDuration = ((Date.now() - uploadStartTime) / 1000).toFixed(2);
-        el.uploadTiming.style.display = 'flex';
-        if (el.uploadTimingValue) el.uploadTimingValue.textContent = `${uploadDuration} 秒`;
-
-        state.taskId = uploadData.task_id;
-        state.cleanupSentTaskId = null;
-
-        showProgress();
-        updateProgress({
-          status: 'queued',
-          message: '任务已启动，正在初始化...',
-          current: 0,
-          total: uploadData.uploaded_count,
-        });
-
-        // 启动搜索
-        const searchRes = await fetch(api(`/api/search/${state.taskId}`), { method: 'POST' });
-        const searchData = await searchRes.json();
-        if (!searchRes.ok) throw new Error(searchData.error || '启动搜索失败');
-
-        startPolling();
-      }
-
-      // 若有失败链接，提示
-      if (uploadData.failed_count && uploadData.failed_count > 0) {
-        console.warn(`有 ${uploadData.failed_count} 个链接下载失败`, uploadData.failed_files);
-      }
-    } catch (error) {
-      console.error('搜索启动失败:', error);
-      let errMsg = error.message;
-      if (error.name === 'AbortError') {
-        errMsg = '上传超时，请检查网络连接或减少图片数量后重试';
-      }
-      alert('启动失败: ' + errMsg);
-      el.searchBtn.disabled = false;
-      el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ urls: batch, auto_search: isLast, task_id: state.taskId, is_last_batch: isLast, expected_total: allUrls.length }),
+        }, 2);
+      } catch (e) { stillFailed.push({ batch, isLast }); }
     }
-  }
-
-  // ====== 进度显示 ======
-  function showProgress() {
-    el.progressSection.hidden = false;
-    el.progressSection.style.display = 'block';
-    el.resultSection.hidden = true;
-    el.resultSection.style.display = 'none';
-    // 重置计时器状态
-    state.searchStartedAt = null;
-    stopElapsedTimer();
-    if (el.elapsedTime) el.elapsedTime.textContent = '00:00';
-    if (el.estimatedTime) el.estimatedTime.textContent = '-';
-    el.imageStatusSection && (el.imageStatusSection.style.display = 'none');
-    document.getElementById('upload-section').scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
-    });
-  }
-
-  function formatPrice(price) {
-    if (price === undefined || price === null || price === '') return '面议';
-    const raw = String(price).trim();
-    if (!raw) return '面议';
-    if (/^¥|元|面议/.test(raw)) return raw;
-    const num = parseFloat(raw.replace(/[^\d.]/g, ''));
-    return Number.isFinite(num) ? `¥${num.toFixed(2)}` : raw;
-  }
-
-  function escapeHtml(value) {
-    return String(value ?? '')
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  // ====== 实时计时器 ======
-  function formatDuration(seconds) {
-    if (seconds < 0) seconds = 0;
-    const m = Math.floor(seconds / 60);
-    const s = Math.floor(seconds % 60);
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
-  }
-
-  function startElapsedTimer() {
-    stopElapsedTimer();
-    updateElapsedDisplay();
-    state.elapsedTimer = setInterval(updateElapsedDisplay, 1000);
-  }
-
-  function stopElapsedTimer() {
-    if (state.elapsedTimer) {
-      clearInterval(state.elapsedTimer);
-      state.elapsedTimer = null;
+    state.submittedOk = allUrls.length - stillFailed.reduce((s, b) => s + b.batch.length, 0);
+    if (stillFailed.length) {
+      throw new Error(`${stillFailed.length} 个批次提交失败（约 ${stillFailed.reduce((s, b) => s + b.batch.length, 0)} 张图片），已提交部分会在后台继续，也可稍后在任务记录中点"继续任务"补传`);
     }
-  }
-
-  function updateElapsedDisplay() {
-    if (!state.searchStartedAt) {
-      if (el.elapsedTime) el.elapsedTime.textContent = '00:00';
-      if (el.estimatedTime) el.estimatedTime.textContent = '-';
-      return;
-    }
-    const startMs = new Date(state.searchStartedAt).getTime();
-    const elapsedSec = (Date.now() - startMs) / 1000;
-    if (el.elapsedTime) el.elapsedTime.textContent = formatDuration(elapsedSec);
-
-    // 预估剩余时间
-    const searched = parseInt(el.progressCurrent.textContent) || 0;
-    const total = parseInt(el.progressTotal.textContent) || 0;
-    if (searched > 0 && total > 0 && searched < total) {
-      const avgPerImage = elapsedSec / searched;
-      const remaining = (total - searched) * avgPerImage;
-      if (el.estimatedTime) el.estimatedTime.textContent = '约 ' + formatDuration(remaining);
-    } else if (searched >= total && total > 0) {
-      if (el.estimatedTime) el.estimatedTime.textContent = '即将完成';
-    } else {
-      if (el.estimatedTime) el.estimatedTime.textContent = '-';
-    }
-  }
-
-  // ====== 渲染每张图片处理状态 ======
-  function renderImageStatusList(imageStatuses) {
-    if (!imageStatuses || imageStatuses.length === 0) {
-      el.imageStatusSection && (el.imageStatusSection.style.display = 'none');
-      return;
-    }
-    el.imageStatusSection && (el.imageStatusSection.style.display = 'block');
-
-    const completedCount = imageStatuses.filter(s =>
-      s.status === 'completed' || s.status === 'no_results'
-    ).length;
-    if (el.imageStatusSummary) el.imageStatusSummary.textContent = `${completedCount}/${imageStatuses.length} 已完成`;
-
-    // 确定当前正在搜索的图片（第一个pending的算作searching）
-    const firstPendingIdx = imageStatuses.findIndex(s => s.status === 'pending');
-
-    const statusConfig = {
-      'pending':      { icon: '·', badge: '等待中',   cls: 'pending' },
-      'searching':    { icon: '→', badge: '搜索中',   cls: 'searching' },
-      'completed':    { icon: '✓', badge: '已完成',   cls: 'completed' },
-      'no_results':   { icon: '!', badge: '无结果',   cls: 'no_results' },
-      'failed':       { icon: '✕', badge: '失败',     cls: 'failed' },
-    };
-
-    el.imageStatusList.innerHTML = imageStatuses.map((img, idx) => {
-      // 如果是第一个pending且有其他已完成，标记为searching
-      let displayStatus = img.status;
-      if (img.status === 'pending' && idx === firstPendingIdx && completedCount < imageStatuses.length) {
-        displayStatus = 'searching';
-      }
-      const cfg = statusConfig[displayStatus] || statusConfig['pending'];
-
-      const timeStr = img.search_time
-        ? `<span class="search-time">${new Date(img.search_time).toLocaleTimeString('zh-CN', {hour12: false})}</span>`
-        : '';
-      const countStr = img.result_count > 0
-        ? `<span class="result-count">${img.result_count} 个商品</span>`
-        : (displayStatus === 'completed' || displayStatus === 'no_results' ? '<span>0 个商品</span>' : '');
-
-      return `
-        <div class="image-status-item">
-          <span class="image-status-icon ${cfg.cls}">${cfg.icon}</span>
-          <span class="image-status-name" title="${img.name}">${img.name}</span>
-          <span class="image-status-info">${countStr}${timeStr}</span>
-          <span class="image-status-badge ${cfg.cls}">${cfg.badge}</span>
-        </div>
-      `;
-    }).join('');
-  }
-
-  function updateProgress(data) {
-    const statusMap = {
-      'pending': '等待中',
-      'queued': '队列中',
-      'initializing': '初始化中',
-      'searching': '搜索中',
-      'completed': '已完成',
-      'failed': '失败',
-    };
-    if (el.progressStatus) el.progressStatus.textContent = statusMap[data.status] || data.status;
-
-    // 记录搜索开始时间（用于实时计时）
-    if (data.search_started_at && !state.searchStartedAt) {
-      state.searchStartedAt = data.search_started_at;
-      startElapsedTimer();
+    state.submittedOk = allUrls.length;
     }
 
-    const isStreaming = data.is_streaming;
-    const downloaded = data.downloaded_count !== undefined ? data.downloaded_count : (data.current || 0);
-    const searched = data.searched_count !== undefined ? data.searched_count : (data.current || 0);
-    const total = data.total || 0;
+  async function startSearch() {
+    if (state.isSearching) return;
+    state.isSearching = true;
+    state.taskId = (typeof crypto !== 'undefined' && crypto.randomUUID)
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+      : Math.random().toString(36).slice(2, 18);
+    registerOwnedTask(state.taskId);
+    state.results = {};
+    state.submittedOk = 0;
+    state.pollStartedAt = Date.now();
+    state.cancelRequested = false;
+    updateSearchBtn();
 
-    if (isStreaming && data.downloaded_count !== undefined && data.searched_count !== undefined) {
-      // 流式搜索：显示双进度条（下载 + 搜索）
-      const downloadPercent = total > 0 ? Math.round((downloaded / total) * 100) : 0;
-      const searchPercent = total > 0 ? Math.round((searched / total) * 100) : 0;
+    $('#progress-section').hidden = false;
+    $('#progress-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    $('#progressStatus').textContent = '准备中...';
+    $('#progressFill').style.width = '0%';
+    $('#progressCurrent').textContent = '0';
+    $('#progressTotal').textContent = '0';
+    $('#progressPercent').textContent = '0%';
+    $('#downloadProgressText').textContent = '0 / 0 · 0%';
+    $('#downloadProgressFill').style.width = '0%';
+    $('#searchProgressText').textContent = '0 / 0 · 0%';
+    $('#searchProgressFill').style.width = '0%';
+    $('#foundProducts').textContent = '0';
+    $('#elapsedTime').textContent = '00:00';
+    $('#estimatedTime').textContent = '-';
+    $('#currentImage').textContent = '-';
+    $('#imageStatusList').innerHTML = '';
+    $('#imageStatusSection').hidden = false;
+    $('#imageStatusSummary').textContent = '0/0 已完成';
+    // 显示停止按钮
+    $('#cancelBtn').hidden = false;
+    $('#cancelBtn').disabled = false;
+    $('#cancelBtn').textContent = '⏹ 停止任务';
+    $('#result-section').hidden = true;
 
-      // 主进度条显示搜索进度
-      el.progressFill.style.width = searchPercent + '%';
-      if (el.progressCurrent) el.progressCurrent.textContent = searched;
-      if (el.progressTotal) el.progressTotal.textContent = total;
-      if (el.progressPercent) el.progressPercent.textContent = searchPercent + '%';
-
-      // 在状态文字中显示下载进度
-      if (el.progressStatus) el.progressStatus.textContent = `边下载边搜索中 · 下载 ${downloaded}/${total} · 搜索 ${searched}/${total}`;
-    } else {
-      // 普通模式
-      const current = data.current || 0;
-      const percent = total > 0 ? Math.round((current / total) * 100) : 0;
-
-      el.progressFill.style.width = percent + '%';
-      if (el.progressCurrent) el.progressCurrent.textContent = current;
-      if (el.progressTotal) el.progressTotal.textContent = total;
-      if (el.progressPercent) el.progressPercent.textContent = percent + '%';
-    }
-
-    if (data.message) {
-      const match = data.message.match(/正在搜索: (.+?) \(/);
-      if (el.currentImage) el.currentImage.textContent = match ? match[1] : data.message;
-    }
-    if (data.results_count !== undefined) {
-      if (el.foundProducts) el.foundProducts.textContent = data.results_count;
-    }
-
-    // 渲染每张图片处理状态列表
-    if (data.image_statuses) {
-      renderImageStatusList(data.image_statuses);
-    }
-  }
-
-  function startPolling() {
-    if (state.pollingTimer) clearInterval(state.pollingTimer);
-    const poll = async () => {
-      try {
-        const res = await fetch(api(`/api/status/${state.taskId}`));
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || '获取状态失败');
-        updateProgress(data);
-        // 动态调整轮询频率：大批量任务时根据进度调整
-        if (data.total > 100) {
-          const progress = data.current / data.total;
-          if (progress < 0.1) {
-            state.pollInterval = 1000;  // 前10%: 1秒
-          } else if (progress < 0.5) {
-            state.pollInterval = 2000;  // 10%-50%: 2秒
-          } else if (progress < 0.8) {
-            state.pollInterval = 3000;  // 50%-80%: 3秒
-          } else {
-            state.pollInterval = 5000;  // 最后20%: 5秒
-          }
-          // 重启定时器应用新间隔
-          clearInterval(state.pollingTimer);
-          state.pollingTimer = setInterval(poll, state.pollInterval);
-        }
-
-        if (data.status === 'completed') {
-          stopPolling();
-          loadResults();
-        } else if (data.status === 'failed') {
-          stopPolling();
-          alert('搜索失败: ' + data.message);
-          el.searchBtn.disabled = false;
-          el.searchBtn.innerHTML = '<span class="btn-icon">🔍</span><span>开始批量搜索</span>';
-        }
-      } catch (error) {
-        console.error('轮询失败:', error);
-      }
-    };
-    poll();
-    state.pollingTimer = setInterval(poll, state.pollInterval);
-  }
-
-  function stopPolling() {
-    if (state.pollingTimer) {
-      clearInterval(state.pollingTimer);
-      state.pollingTimer = null;
-    }
-    stopElapsedTimer();
-  }
-
-  // ====== 加载结果（第一页）======
-  async function loadResults() {
-    if (!state.taskId) return;
-    state.pagination.currentPage = 1;
-    state.pagination.totalItems = 0;
-    state.pagination.imageNames = [];
-    await loadResultsPage({ keepResults: false });
-  }
-
-  // ====== 加载某一页结果（后端分页）======
-  async function loadResultsPage({ keepResults = false } = {}) {
-    if (!state.taskId) return;
-    if (state.pagination.loading) return;
-    state.pagination.loading = true;
-    setPagerLoadingState(true);
-    const page = state.pagination.currentPage;
-    const size = state.pagination.pageSize;
-    const offset = (page - 1) * size;
+    const t0 = Date.now();
+    let endpoint, body;
+    startPolling();
     try {
-      const res = await fetch(api(`/api/results/${state.taskId}?offset=${offset}&limit=${size}`));
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || '获取结果失败');
-      state.results = data;
-      if (!keepResults) {
-        // 第一次进入结果区：渲染统计卡 + 第一页
-        renderResults(data);
+      if (state.activeTab === 'batch') {
+        endpoint = `${state.apiBase}/api/upload/${state.taskId}`;
+        const fd = new FormData();
+        state.files.forEach((f) => fd.append('files', f.file));
+        const res = await fetchWithRetry(endpoint, { method: 'POST', body: fd });
+        const json = await res.json();
+        // 立刻触发搜索
+        await fetchWithRetry(`${state.apiBase}/api/search/${state.taskId}`, { method: 'POST' });
+      } else if (state.activeTab === 'link') {
+        // 后端立即接收批次并后台下载；这里逐批提交，单批失败收集后重试，不中断整个上传。
+        endpoint = `${state.apiBase}/api/upload_urls`;
+        const allUrls = state.urls.map((u) => u.url);
+        await submitUrlBatches(endpoint, allUrls);
       } else {
-        // 翻页：仅重渲染当前页列表
-        renderPaginatedResults(data);
+        // table: 从 Excel/CSV 识别的 URL，同样按批次提交并后台下载。
+        endpoint = `${state.apiBase}/api/upload_urls`;
+        const allUrls = (state.tableUrls || []).map((u) => u.url);
+        await submitUrlBatches(endpoint, allUrls);
       }
-    } catch (error) {
-      console.error('加载结果页失败:', error);
-      alert('加载结果失败: ' + error.message);
-    } finally {
-      state.pagination.loading = false;
-      setPagerLoadingState(false);
+      const seconds = ((Date.now() - t0) / 1000).toFixed(1);
+      $('#uploadTiming').hidden = false;
+      $('#timingVal').textContent = seconds;
+    } catch (e) {
+      if (state.submittedOk > 0) {
+        // 已有批次提交成功，任务在后台继续，保持进度轮询。
+        alert('提示：' + e.message);
+      } else {
+        stopPolling();
+        alert('上传失败：' + e.message);
+        state.isSearching = false;
+        updateSearchBtn();
+      }
     }
   }
 
-  function setPagerLoadingState(loading) {
-    if (el.paginationWrap) el.paginationWrap.classList.toggle('is-loading', !!loading);
+  // ============== Polling ==============
+  function startPolling() {
+    stopPolling();
+    state.elapsedTimer = setInterval(() => {
+      const sec = (Date.now() - state.pollStartedAt) / 1000;
+      $('#elapsedTime').textContent = fmtClock(sec);
+    }, 1000);
+    poll();
+    state.pollTimer = setInterval(poll, POLL_INTERVAL);
   }
-
-  // ====== 渲染结果（列表方式：一行一图） ======
-  function renderResults(data) {
-    el.progressSection.hidden = true;
-    el.progressSection.style.display = 'none';
-    el.resultSection.hidden = false;
-    el.resultSection.style.display = 'block';
-
-    const totalImages = data.total_images || 0;
-    const totalProducts = data.total_products || 0;
-    const searchDuration = data.search_duration || 0;
-
-    if (el.resultSubtitle) el.resultSubtitle.textContent = `共搜索 ${totalImages} 张图片，找到 ${totalProducts} 个商品`;
-
-    // 格式化总耗时（秒和分钟）
-    const durationSec = searchDuration.toFixed(2);
-    const durationMin = (searchDuration / 60).toFixed(1);
-    const durationText = searchDuration >= 60
-      ? `${durationSec} 秒（${durationMin} 分钟）`
-      : `${durationSec} 秒`;
-
-    el.statsRow.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-num">${totalImages}</div>
-        <div class="stat-label">搜索图片数</div>
-      </div>
-      <div class="stat-card secondary">
-        <div class="stat-num">${totalProducts}</div>
-        <div class="stat-label">找到商品数</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-num">${totalImages > 0 ? Math.round(totalProducts / totalImages) : 0}</div>
-        <div class="stat-label">平均结果/图</div>
-      </div>
-      <div class="stat-card timing-card">
-        <div class="stat-num">${durationText}</div>
-        <div class="stat-label">接口总耗时</div>
-      </div>
-    `;
-
-    // 准备分页数据：以后端给的 total_images 为准
-    state.pagination.totalItems = data.total_images || 0;
-    state.pagination.currentPage = 1;
-    // 渲染当前页（首屏这一页）
-    renderPaginatedResults(data);
-
-    el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  function stopPolling() {
+    if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
+    if (state.elapsedTimer) { clearInterval(state.elapsedTimer); state.elapsedTimer = null; }
   }
-
-  // ====== 分页渲染结果行（接受后端单页响应 data）======
-  function renderPaginatedResults(data) {
-    const pg = state.pagination;
-    const results = (data && data.results) || {};
-    const totalItems = data && typeof data.total_images === 'number' ? data.total_images : pg.totalItems;
-    pg.totalItems = totalItems;
-    const pageSize = pg.pageSize;
-    const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
-    if (pg.currentPage > totalPages) pg.currentPage = totalPages;
-
-    const startIdx = (pg.currentPage - 1) * pageSize;
-    const endIdx = Math.min(startIdx + pageSize, totalItems);
-
-    el.resultList.innerHTML = '';
-    Object.keys(results).forEach((imageName) => {
-      const imageData = results[imageName];
-      const row = createResultRow(imageName, imageData);
-      el.resultList.appendChild(row);
+  async function poll() {
+    try {
+      const res = await fetchWithRetry(`${state.apiBase}/api/status/${state.taskId}`, {}, 1);
+      const json = await res.json();
+      applyProgress(json);
+      if (json.status === 'completed' || json.status === 'partial' || json.status === 'failed') {
+        stopPolling();
+        $('#cancelBtn').hidden = true;
+        const wasCancelled = state.cancelRequested;
+        state.cancelRequested = false;
+        state.isSearching = false;
+        // 任务结束后一律请求结果并展示结果区，避免失败图片或零结果阻断已完成图片的结果展示。
+        await loadResults();
+        if (wasCancelled) $('#progressStatus').textContent = '⏹ 已停止任务';
+        updateSearchBtn();
+      }
+    } catch (e) {
+      console.warn('poll error:', e);
+    }
+  }
+  function applyProgress(j) {
+    state.lastProgress = j;
+    const total = Number.isFinite(Number(j.total)) ? Number(j.total) : 0;
+    const searched = Number.isFinite(Number(j.searched_count)) ? Number(j.searched_count) : 0;
+    const downloaded = Number.isFinite(Number(j.downloaded_count)) ? Number(j.downloaded_count) : 0;
+    // 进度条分阶段：下载阶段按已下载数，搜索阶段按已搜索数，分子随真实进度推进。
+    const isSearchPhase = ['searching', 'completed', 'partial'].includes(j.status) || searched > 0;
+    const cur = isSearchPhase ? searched : downloaded;
+    $('#progressTotal').textContent = total;
+    $('#progressCurrent').textContent = cur;
+    const pct = total ? Math.min(100, Math.round((cur / total) * 100)) : 0;
+    const downloadPct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0;
+    const searchPct = total ? Math.min(100, Math.round((searched / total) * 100)) : 0;
+    $('#progressPercent').textContent = pct + '%';
+    $('#progressFill').style.width = pct + '%';
+    $('#downloadProgressText').textContent = `${downloaded} / ${total} · ${downloadPct}%`;
+    $('#downloadProgressFill').style.width = downloadPct + '%';
+    $('#searchProgressText').textContent = `${searched} / ${total} · ${searchPct}%`;
+    $('#searchProgressFill').style.width = searchPct + '%';
+    // 边下边搜：搜索进行中同时显示下载进度和真实活跃并发。
+    const dlNote = downloaded < total ? ` · 下载中 ${downloaded}/${total}` : '';
+    const pool = j.search_pool || {};
+    const concurrencyNote = isSearchPhase ? ` · 并发 ${Number(pool.active) || 0}/${Number(pool.configured) || 7}` : '';
+    const cooldownSeconds = Math.max(0, Math.ceil((Number(pool.cooldown_remaining_ms) || 0) / 1000));
+    const cooldownNote = isSearchPhase && pool.cooling_down ? ` · 请求保护暂停 ${cooldownSeconds}秒` : '';
+    $('#progressStatus').textContent = (isSearchPhase && j.status === 'searching') ? `搜索中 ${cur}/${total}${dlNote}${concurrencyNote}${cooldownNote}` : (j.message || j.status || '准备中');
+    // 商品总数由服务端从 SQLite 汇总返回，避免用图片数冒充商品数。
+    const products = Number.isFinite(Number(j.total_products)) ? Number(j.total_products) : 0;
+    $('#foundProducts').textContent = products;
+    if (total > 0 && cur > 0) {
+      // 搜索阶段用服务端记录的搜索开始时间，避免把下载耗时算进剩余预估。
+      const phaseStart = (isSearchPhase && Number(j.search_started_at)) ? Number(j.search_started_at) : state.pollStartedAt;
+      const elapsed = Math.max(1, (Date.now() - phaseStart) / 1000);
+      const avg = elapsed / cur;
+      const remain = avg * (total - cur);
+      $('#estimatedTime').textContent = fmtTime(remain);
+    }
+    // 阶段化描述：直接用服务端真实计数，不依赖只返回前 200 条的状态明细。
+    const imgStatuses = j.image_statuses || [];
+    const imgTotal = Number(j.image_statuses_total) || Number(j.total) || imgStatuses.length || 0;
+    const statusLabel = j.status === 'completed' ? '已完成' : (j.status === 'partial' ? '部分完成' : (isSearchPhase ? '搜索中' : '下载中'));
+    $('#currentImage').textContent = `${statusLabel}：${isSearchPhase ? searched : downloaded}/${imgTotal} 张`;
+    // 渲染状态列表
+    const list = $('#imageStatusList');
+    list.innerHTML = '';
+    let done = 0;
+    (j.image_statuses || []).forEach((s) => {
+      if (s.status === 'completed' || s.status === 'no_results' || s.status === 'failed') done++;
+      const labels = { pending: '等待中', downloading: '下载中', downloaded: '已下载', searching: '搜索中', completed: '已完成', no_results: '无结果', failed: '失败' };
+      const row = h('div', { class: 'image-status-row' },
+        h('span', { class: 'name', title: s.name }, s.name),
+        h('span', { class: `status-badge ${s.status}` }, labels[s.status] || s.status),
+        s.result_count != null ? h('span', { class: 'meta-item' }, `${s.result_count} 个结果`) : null,
+      );
+      list.appendChild(row);
     });
-
-    updatePaginationControls(totalPages, startIdx, endIdx);
+    const visibleNote = imgStatuses.length < imgTotal ? `（显示最新 ${imgStatuses.length} 条）` : '';
+    $('#imageStatusSummary').textContent = `${Number(j.searched_count) || done}/${imgTotal} 已完成 ${visibleNote}`;
   }
 
-  // ====== 更新分页控件 ======
-  function updatePaginationControls(totalPages, startIdx, endIdx) {
-    const pg = state.pagination;
-    const total = pg.totalItems;
+  // ============== Results ==============
+  async function loadResults(page = 1) {
+    try {
+      const pageSize = state.pagination.pageSize;
+      const offset = (page - 1) * pageSize;
+      const res = await fetchWithRetry(`${state.apiBase}/api/results/${state.taskId}?limit=${pageSize}&offset=${offset}`, {}, 1);
+      const j = await res.json();
+      state.results = j.results || {};
+      state.resultMeta = j;
+      state.pagination.currentPage = page;
+      renderResults();
+    } catch (e) {
+      console.error('loadResults error:', e);
+    }
+  }
 
-    if (total === 0) {
-      el.paginationWrap.style.display = 'none';
+  function renderResults() {
+    $('#result-section').hidden = false;
+    $('#result-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const names = Object.keys(state.results);
+    const meta = state.resultMeta || {};
+    state.pagination.imageNames = names;
+    state.pagination.totalItems = Number(meta.total_results) || names.length;
+    const totalProducts = Number(meta.total_products) || 0;
+    $('#foundProducts').textContent = totalProducts;
+    const totalImages = state.pagination.totalItems;
+    $('#resultSubtitle').textContent = `已保存 ${totalImages} 张图片结果，找到 ${totalProducts} 个商品`;
+
+    // stats cards
+    const dur = state.lastProgress ? ((Date.now() - state.pollStartedAt) / 1000).toFixed(1) : '0';
+    $('#statsRow').innerHTML = '';
+    $('#statsRow').appendChild(makeStatsCard('搜索图片数', totalImages, false));
+    $('#statsRow').appendChild(makeStatsCard('找到商品数', totalProducts, true));
+    $('#statsRow').appendChild(makeStatsCard('平均结果/图', totalImages ? (totalProducts / totalImages).toFixed(1) : '0', false));
+    $('#statsRow').appendChild(makeStatsCard('接口总耗时', dur + '秒', false));
+
+    renderPage();
+  }
+
+  function makeStatsCard(label, val, primary) {
+    return h('div', { class: 'stats-card' + (primary ? ' primary' : '') },
+      h('div', { class: 'stat-label' }, label),
+      h('div', { class: 'stat-value' }, String(val)),
+    );
+  }
+
+  function renderPage() {
+    const list = $('#resultList');
+    list.innerHTML = '';
+    const { currentPage, pageSize, imageNames, totalItems } = state.pagination;
+    const total = totalItems;
+    if (imageNames.length === 0) {
+      list.appendChild(h('div', { class: 'empty-state' },
+        h('div', { class: 'empty-state-icon' }, '🔍'),
+        h('p', {}, '未找到匹配的商品')));
+      $('#paginationWrap').hidden = true;
       return;
     }
-
-    el.paginationWrap.style.display = 'flex';
-    if (el.pageCurrentNum) el.pageCurrentNum.textContent = pg.currentPage;
-    if (el.pageTotalNum) el.pageTotalNum.textContent = totalPages;
-    if (el.paginationInfo) el.paginationInfo.textContent = `第 ${startIdx + 1}-${endIdx} 条，共 ${total} 条`;
-
-    // 按钮状态
-    el.pageFirst.disabled = pg.currentPage <= 1;
-    el.pagePrev.disabled = pg.currentPage <= 1;
-    el.pageNext.disabled = pg.currentPage >= totalPages;
-    el.pageLast.disabled = pg.currentPage >= totalPages;
-
-    el.pageJumpInput.max = totalPages;
-    el.pageJumpInput.value = pg.currentPage;
-    if (typeof renderFloatingPager === 'function') renderFloatingPager();
+    const start = (currentPage - 1) * pageSize;
+    const end = Math.min(start + imageNames.length, total);
+    const pageItems = imageNames;
+    pageItems.forEach((imgName) => {
+      const entry = state.results[imgName] || {};
+      const items = (entry.results || []).slice().sort((a, b) => (a.rank || 0) - (b.rank || 0));
+      const row = h('div', { class: 'result-row' });
+      row.appendChild(h('div', { class: 'result-source' }, h('img', { src: `${state.apiBase}/uploads/${state.taskId}/${encodeURIComponent(imgName)}`, alt: imgName, loading: 'lazy' })));
+      const miniWrap = h('div', { class: 'result-mini-cards' });
+      items.slice(0, 5).forEach((it, i) => miniWrap.appendChild(buildMiniCard(it, i + 1)));
+      row.appendChild(miniWrap);
+      const moreWrap = h('div', { class: 'result-more' });
+      if (items.length > 5) {
+        const btn = h('button', { class: 'btn-view-more' }, `查看更多 +${items.length - 5}`);
+        on(btn, 'click', () => openResultModal(imgName, entry));
+        moreWrap.appendChild(btn);
+      }
+      const btnAll = h('button', { class: 'btn-view-more' }, '查看全部');
+      on(btnAll, 'click', () => openResultModal(imgName, entry));
+      moreWrap.appendChild(btnAll);
+      row.appendChild(moreWrap);
+      list.appendChild(row);
+    });
+    $('#paginationWrap').hidden = total <= pageSize;
+    $('#paginationInfo').textContent = `第 ${start + 1}-${end} 条，共 ${total} 条`;
+    $('#pageCurrentNum').textContent = currentPage;
+    $('#pageTotalNum').textContent = Math.max(1, Math.ceil(total / pageSize));
+    $('#pagePrev').disabled = currentPage <= 1;
+    $('#pageNext').disabled = currentPage >= Math.ceil(total / pageSize);
+    $('#pageFirst').disabled = currentPage <= 1;
+    $('#pageLast').disabled = currentPage >= Math.ceil(total / pageSize);
   }
 
-  // ====== 分页事件绑定（后端分页：每次切页都重新请求）======
+  function buildMiniCard(item, rank) {
+    const tpl = $('#miniCardTemplate');
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    node.href = item.url || '#';
+    node.querySelector('img').src = item.image || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f5f7fb"/%3E%3Ctext x="50" y="55" text-anchor="middle" font-size="12" fill="%238b94b0"%3E无图%3C/text%3E%3C/svg%3E';
+    node.querySelector('.mini-title').textContent = item.title || '暂无标题';
+    node.querySelector('.mini-rank').textContent = '#' + rank;
+    node.querySelector('.mini-price').textContent = item.price ? `¥ ${item.price}` : '-';
+    const meta = node.querySelector('.mini-meta');
+    meta.innerHTML = '';
+    if (item.rating) meta.appendChild(h('span', { class: 'mini-meta-item' }, `⭐ ${item.rating}`));
+    if (item.reviews) meta.appendChild(h('span', { class: 'mini-meta-item' }, `💬 ${item.reviews} 条评价`));
+    return node;
+  }
+
+  function buildFullCard(item, rank) {
+    const tpl = $('#productCardTemplate');
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    node.href = item.url || '#';
+    node.querySelector('img').src = item.image || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect width="100" height="100" fill="%23f5f7fb"/%3E%3Ctext x="50" y="55" text-anchor="middle" font-size="12" fill="%238b94b0"%3E无图%3C/text%3E%3C/svg%3E';
+    node.querySelector('.product-title').textContent = item.title || '暂无标题';
+    node.querySelector('.product-price').textContent = item.price ? `¥ ${item.price}` : '-';
+    const meta = node.querySelector('.product-meta');
+    meta.innerHTML = '';
+    if (item.rating) meta.appendChild(h('span', { class: 'meta-item' }, `⭐ ${item.rating}`));
+    if (item.reviews) meta.appendChild(h('span', { class: 'meta-item' }, `💬 ${item.reviews} 条评价`));
+    if (item.rank) meta.appendChild(h('span', { class: 'meta-item' }, `#${item.rank}`));
+    const fill = node.querySelector('.similarity-fill');
+    const sim = item.similarity != null ? item.similarity : (item.rank ? Math.max(0, 1 - item.rank / 50) : 0.5);
+    fill.style.width = Math.max(10, Math.min(100, sim * 100)) + '%';
+    return node;
+  }
+
+  function openResultModal(imgName, entry) {
+    $('#resultModalThumb').src = `${state.apiBase}/uploads/${state.taskId}/${encodeURIComponent(imgName)}`;
+    $('#resultModalTitle').textContent = imgName;
+    const items = (entry.results || []).slice().sort((a, b) => (a.rank || 0) - (b.rank || 0));
+    // 展示分阶段耗时：上传 / 图搜 / 总计
+    const upS = entry.upload_seconds != null ? entry.upload_seconds : 0;
+    const srS = entry.search_seconds != null ? entry.search_seconds : (entry.search_time || 0);
+    const totalS = entry.total_seconds != null ? entry.total_seconds : (entry.search_time || 0);
+    const durText = `上传 ${upS.toFixed(1)}s · 搜索 ${srS.toFixed(1)}s · 总计 ${totalS.toFixed(1)}s`;
+    $('#resultModalSub').textContent = `共 ${items.length} 个结果 · ${durText}`;
+    const grid = $('#resultModalGrid');
+    grid.innerHTML = '';
+    items.forEach((it, i) => grid.appendChild(buildFullCard(it, i + 1)));
+    $('#resultModal').hidden = false;
+  }
+  function closeResultModal() { $('#resultModal').hidden = true; }
+
+  // ============== Pagination ==============
   function setupPagination() {
-    el.pageSizeSelect.addEventListener('change', () => {
-      const size = parseInt(el.pageSizeSelect.value);
-      if (!size || size === state.pagination.pageSize) return;
-      state.pagination.pageSize = size;
-      state.pagination.currentPage = 1;
-      if (el.pagerSizeInput) el.pagerSizeInput.value = String(size);
-      loadResultsPage({ keepResults: true });
+    on($('#pageFirst'), 'click', () => loadResults(1));
+    on($('#pagePrev'), 'click', () => { if (state.pagination.currentPage > 1) loadResults(state.pagination.currentPage - 1); });
+    on($('#pageNext'), 'click', () => loadResults(state.pagination.currentPage + 1));
+    on($('#pageLast'), 'click', () => loadResults(Math.ceil(state.pagination.totalItems / state.pagination.pageSize)));
+    on($('#pageJumpBtn'), 'click', () => {
+      const v = Number($('#pageJumpInput').value);
+      if (v >= 1 && v <= Math.ceil(state.pagination.totalItems / state.pagination.pageSize)) loadResults(v);
     });
-
-    el.pageFirst.addEventListener('click', () => goToPage(1));
-    el.pagePrev.addEventListener('click', () => goToPage(state.pagination.currentPage - 1));
-    el.pageNext.addEventListener('click', () => goToPage(state.pagination.currentPage + 1));
-    el.pageLast.addEventListener('click', () => {
-      const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
-      goToPage(totalPages);
-    });
-
-    el.pageJumpBtn.addEventListener('click', () => {
-      const page = parseInt(el.pageJumpInput.value);
-      if (page) goToPage(page);
-    });
-
-    el.pageJumpInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') el.pageJumpBtn.click();
-    });
+    on($('#pageSizeSelect'), 'change', (e) => { state.pagination.pageSize = Number(e.target.value); loadResults(1); });
   }
 
-  function goToPage(page) {
-    const totalPages = Math.max(1, Math.ceil(state.pagination.totalItems / state.pagination.pageSize));
-    const target = Math.min(Math.max(1, page), totalPages);
-    if (target === state.pagination.currentPage) return;
-    state.pagination.currentPage = target;
-    loadResultsPage({ keepResults: true }).then(() => {
-      // 滚到当前页第一行
-      const firstRow = el.resultList.querySelector('.result-row');
-      if (firstRow) {
-        firstRow.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      } else {
-        el.resultSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
-      if (typeof renderFloatingPager === 'function') renderFloatingPager();
+  // ============== Settings ==============
+  function openSettings() {
+    $('#apiBaseInput').value = state.apiBase;
+    $('#settingsModal').hidden = false;
+    testConnection();
+  }
+  function closeSettings() { $('#settingsModal').hidden = true; }
+  async function testConnection() {
+    const dot = $('#connectionStatus .status-dot');
+    const text = $('#connectionStatus .status-text');
+    dot.className = 'status-dot checking';
+    text.textContent = '检测中...';
+    try {
+      const res = await fetch(`${state.apiBase}/api/tasks`, { method: 'GET' });
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      await res.json();
+      dot.className = 'status-dot success';
+      text.textContent = '连接成功';
+    } catch (e) {
+      dot.className = 'status-dot error';
+      text.textContent = '连接失败：' + e.message;
+    }
+  }
+  function setupSettings() {
+    on($('#settingsBtn'), 'click', openSettings);
+    on($('#settingsClose'), 'click', closeSettings);
+    on($('#settingsCancel'), 'click', closeSettings);
+    on($('#settingsSave'), 'click', () => {
+      const v = $('#apiBaseInput').value.trim();
+      if (v) { setApiBase(v); $('#settingsSave').textContent = '✓ 已保存'; setTimeout(() => $('#settingsSave').textContent = '保存设置', 1200); }
     });
+    on($('#settingsOverlay'), 'click', closeSettings);
+    on(document, 'keydown', (e) => { if (e.key === 'Escape') { closeSettings(); closeResultModal(); } });
   }
 
-  // ====== 创建结果行（一行一图 + 横向商品 + 查看更多） ======
-  function createResultRow(imageName, imageData) {
-    const row = document.createElement('div');
-    row.className = 'result-row';
-
-    const items = imageData.results || [];
-    // 相似度升序：值越小越相似
-    const sortedItems = [...items].sort((a, b) => {
-      const sa = a.similarity !== undefined && a.similarity !== null ? a.similarity : 999;
-      const sb = b.similarity !== undefined && b.similarity !== null ? b.similarity : 999;
-      return sa - sb;
-    });
-
-    // 获取上传图片预览URL
-    let imageUrl = '';
-    if (state.taskId && imageData.image_name) {
-      imageUrl = api(`/uploads/${state.taskId}/${imageData.image_name}`);
-    }
-
-    const count = imageData.result_count || 0;
-
-    // === 第一列：上传的图片 ===
-    const sourceCell = document.createElement('div');
-    sourceCell.className = 'result-source';
-    sourceCell.innerHTML = `
-      <img class="result-source-img" src="${imageUrl}" alt="${imageName}" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-      <div class="result-source-fallback" style="display:none;">📷</div>
-      <div class="result-source-name">${imageName}</div>
-      <div class="result-source-count ${count === 0 ? 'zero' : ''}">${count === 0 ? '无结果' : count + ' 个结果'}</div>
-    `;
-    row.appendChild(sourceCell);
-
-    // === 中间列：前 N 个商品（横向） ===
-    const productsCell = document.createElement('div');
-    productsCell.className = 'result-products';
-
-    if (sortedItems.length === 0) {
-      productsCell.innerHTML = `
-        <div class="result-empty">
-          <div class="empty-icon">🔍</div>
-          <p>未找到匹配的商品</p>
-        </div>
-      `;
-    } else {
-      const previewItems = sortedItems.slice(0, ROW_PREVIEW_LIMIT);
-      previewItems.forEach(item => {
-        productsCell.appendChild(createMiniProductCard(item));
-      });
-    }
-    row.appendChild(productsCell);
-
-    // === 最右侧：查看更多按钮 ===
-    const actionCell = document.createElement('div');
-    actionCell.className = 'result-action';
-    if (sortedItems.length > ROW_PREVIEW_LIMIT) {
-      const moreBtn = document.createElement('button');
-      moreBtn.className = 'btn btn-outline view-more-btn';
-      moreBtn.innerHTML = `<span>查看更多</span><span class="more-count">+${sortedItems.length - ROW_PREVIEW_LIMIT}</span>`;
-      moreBtn.addEventListener('click', () => {
-        openResultModal(imageName, imageUrl, sortedItems, imageData);
-      });
-      actionCell.appendChild(moreBtn);
-    } else if (sortedItems.length > 0) {
-      // 即使没超过限制，也提供"查看全部"入口
-      const moreBtn = document.createElement('button');
-      moreBtn.className = 'btn btn-ghost view-all-btn';
-      moreBtn.innerHTML = `<span>查看全部</span>`;
-      moreBtn.addEventListener('click', () => {
-        openResultModal(imageName, imageUrl, sortedItems, imageData);
-      });
-      actionCell.appendChild(moreBtn);
-    }
-    row.appendChild(actionCell);
-
-    return row;
+  // ============== Notice ==============
+  function setupNotice() {
+    on($('#noticeClose'), 'click', () => $('#apiNotice').hidden = true);
+    on($('#apiNotice'), 'click', (e) => { if (e.target.tagName === 'A') return; openSettings(); });
   }
 
-  // ====== 迷你商品卡片（用于结果行内横向展示） ======
-  function createMiniProductCard(item) {
-    const card = document.createElement('div');
-    card.className = 'mini-product-card';
-
-    // 相似度徽章（橙色背景 #ff6a00，保留2位小数）
-    let simBadge = '';
-    if (item.similarity !== undefined && item.similarity !== null) {
-      const displaySim = Number(item.similarity).toFixed(2);
-      simBadge = `<div class="similarity-badge" style="background:#ff6a00;">${displaySim}</div>`;
-    }
-
-    const imgHtml = item.image
-      ? `<img src="${item.image}" alt="${item.title || ''}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">`
-      : '<div class="mini-img-placeholder">无图</div>';
-
-    // 起批量
-    let moqHtml = '';
-    if (item.quantity_begin) {
-      moqHtml = `<span class="mini-moq">${item.quantity_begin}</span>`;
-    }
-
-    // 销量 + 订单数
-    let salesHtml = '';
-    const salesParts = [];
-    if (item.sale_quantity) {
-      salesParts.push(`<span class="mini-sales-item" title="总件数">📦${item.sale_quantity}</span>`);
-    }
-    if (item.booked_count) {
-      salesParts.push(`<span class="mini-sales-item" title="总订单数">📋${item.booked_count}</span>`);
-    }
-    if (salesParts.length > 0) {
-      salesHtml = `<div class="mini-sales-row">${salesParts.join('')}</div>`;
-    }
-
-    const deliveryParts = [];
-    if (item.fenxiao_time_limit) {
-      deliveryParts.push(`<span class="mini-delivery-item" title="揽收时效">⏱ ${item.fenxiao_time_limit}</span>`);
-    }
-    const deliveryHtml = deliveryParts.length > 0
-      ? `<div class="mini-delivery-row">${deliveryParts.join('')}</div>`
-      : '';
-
-    // 店铺 + 城市 + 开店年限
-    let shopHtml = '';
-    if (item.shop) {
-      const shopUrl = item.win_port_url || item.shop_url || '#';
-      let shopMeta = '';
-      const metaParts = [];
-      if (item.city) {
-        metaParts.push(`<span class="mini-shop-city">📍${item.city}</span>`);
-      }
-      if (item.shop_year) {
-        metaParts.push(`<span class="mini-shop-year">🏪${item.shop_year}</span>`);
-      }
-      if (metaParts.length > 0) {
-        shopMeta = `<div class="mini-shop-meta">${metaParts.join('')}</div>`;
-      }
-      shopHtml = `
-        <div class="mini-product-shop-wrapper">
-          <a class="mini-product-shop" href="${shopUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.shop}</a>
-          ${shopMeta}
-        </div>
-      `;
-    }
-
-    card.innerHTML = `
-      <div class="mini-product-img">
-        ${simBadge}
-        ${imgHtml}
-      </div>
-      <div class="mini-product-body">
-        <a class="mini-product-title" href="${item.url || '#'}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${item.title || '暂无标题'}</a>
-        <div class="mini-price-row">
-          <span class="mini-product-price">${formatPrice(item.price)}</span>
-          ${moqHtml}
-        </div>
-        ${salesHtml}
-        ${deliveryHtml}
-        ${shopHtml}
-      </div>
-    `;
-
-    // 图片也可点击跳转
-    if (item.url) {
-      const imgEl = card.querySelector('.mini-product-img');
-      imgEl.style.cursor = 'pointer';
-      imgEl.addEventListener('click', (e) => {
-        e.stopPropagation();
-        window.open(item.url, '_blank');
-      });
-    }
-
-    return card;
-  }
-
+  // ============== Result Modal ==============
   function setupResultModal() {
-    el.resultModalOverlay.addEventListener('click', closeResultModal);
-    el.resultModalClose.addEventListener('click', closeResultModal);
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && el.resultModal && el.resultModal.style.display !== 'none') {
-        closeResultModal();
+    on($('#resultModalClose'), 'click', closeResultModal);
+    on($('#resultModalOverlay'), 'click', closeResultModal);
+  }
+
+  // ============== Export / New ==============
+  async function exportExcel() {
+    if (!state.taskId) { alert('暂无可导出的任务'); return; }
+    const btn = $('#exportExcelBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '正在导出...'; }
+    try {
+      const res = await fetch(`${state.apiBase}/api/export/${encodeURIComponent(state.taskId)}.xlsx`);
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        throw new Error(body || `HTTP ${res.status}`);
       }
-    });
-  }
-
-  // ====== Excel / CSV 表格上传 (spreadsheet-drop-zone) ======
-  function setupTableLinksInput() {
-    if (!el.tableFileInput) return;
-    el.tableFileInput.addEventListener('change', (e) => {
-      const fl = Array.from(e.target.files || []);
-      handleTableFiles(fl);
-      el.tableFileInput.value = '';
-    });
-    const dropZone = el.tableFileInput.closest('.drop-zone');
-    if (dropZone) {
-      dropZone.addEventListener('click', () => el.tableFileInput.click());
-      dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('dragover');
-      });
-      dropZone.addEventListener('dragleave', () => dropZone.classList.remove('dragover'));
-      dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('dragover');
-        const fl = Array.from(e.dataTransfer.files || []);
-        handleTableFiles(fl);
-      });
-    }
-    if (el.tableUrlTextarea) {
-      const update = () => {
-        if (el.tableUrlCount) {
-          const n = (el.tableUrlTextarea.value.match(/^https?:\/\//gmi) || []).length;
-          if (el.tableUrlCount) el.tableUrlCount.textContent = n + ' 条链接';
-        }
-        updateButtons();
-      };
-      el.tableUrlTextarea.addEventListener('input', update);
-    }
-    if (el.previewTableBtn) {
-      el.previewTableBtn.addEventListener('click', () => {
-        const urls = parseTableLinks();
-        renderTablePreview(urls);
-      });
-    }
-    if (el.refreshTableUrlsBtn) {
-      el.refreshTableUrlsBtn.addEventListener('click', () => {
-        const urls = parseTableLinks();
-        state.tableLinks = urls;
-        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
-        renderTablePreview(urls);
-        updateButtons();
-      });
-    }
-    if (el.clearTableBtn) {
-      el.clearTableBtn.addEventListener('click', () => {
-        state.tableLinks = [];
-        if (el.tableFileInfo) el.tableFileInfo.hidden = true;
-        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
-        if (el.tablePreview) el.tablePreview.hidden = true;
-        if (el.tableGrid) el.tableGrid.innerHTML = '';
-        updateButtons();
-      });
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = h('a', { href: url, download: `1688图搜结果_${state.taskId}.xlsx` });
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert('Excel 导出失败：' + e.message);
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = '导出 Excel'; }
     }
   }
-
-  function parseTableLinks() {
-    if (!el.tableUrlTextarea) return [];
-    return el.tableUrlTextarea.value
-      .split(/\r?\n/)
-      .map(s => s.trim())
-      .filter(s => /^https?:\/\//i.test(s));
-  }
-
-  async function handleTableFiles(files) {
-    if (!files || files.length === 0) return;
-    await loadSheetJSFallback();
-    for (const file of files) {
-      try {
-        const urls = await parseSpreadsheet(file);
-        state.tableLinks = urls;
-        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
-        if (el.tableFileName) el.tableFileName.textContent = file.name;
-        if (el.tableUrlCount) el.tableUrlCount.textContent = urls.length + ' 条链接';
-        if (el.tableUrlTextarea) el.tableUrlTextarea.value = urls.join('\n');
-        renderTablePreview(urls);
-      } catch (err) {
-        if (el.tableFileInfo) el.tableFileInfo.hidden = false;
-        if (el.tableFileName) el.tableFileName.textContent = file.name + ' (错误)';
-        if (el.tableUrlCount) el.tableUrlCount.textContent = '解析失败: ' + (err.message || '');
-        if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
-      }
-    }
-    updateButtons();
-  }
-
-  function renderTablePreview(urls) {
-    if (!el.tableGrid || !el.tablePreview) return;
-    if (!urls || urls.length === 0) {
-      el.tablePreview.hidden = true;
-      el.tableGrid.innerHTML = '';
-      return;
-    }
-    el.tablePreview.hidden = false;
-    el.tableGrid.innerHTML = urls.slice(0, 60).map(url => {
-      const safe = String(url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-      return `<div class="file-grid-item">
-        <img src="${safe}" loading="lazy" onerror="this.style.opacity=0.3" alt="">
-        <div class="file-grid-name">${safe.slice(0, 40)}${safe.length > 40 ? '…' : ''}</div>
-      </div>`;
-    }).join('');
-  }
-
-  // ====== SheetJS fallback (xlsx 解析) ======
-  let sheetJSPromise = null;
-  async function loadSheetJSFallback() {
-    if (typeof XLSX !== 'undefined') return;
-    if (sheetJSPromise) return sheetJSPromise;
-    sheetJSPromise = new Promise((resolve, reject) => {
-      const s = document.createElement('script');
-      s.src = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-      s.onload = resolve;
-      s.onerror = reject;
-      document.head.appendChild(s);
-    });
-    return sheetJSPromise;
-  }
-
-  async function parseSpreadsheet(file) {
-    const ext = file.name.split('.').pop().toLowerCase();
-    const buf = await file.arrayBuffer();
-    if (ext === 'csv') {
-      const text = new TextDecoder('utf-8').decode(buf);
-      const urls = [];
-      text.split(/\r?\n/).forEach(line => {
-        const parts = line.split(/[,\t;|]/);
-        parts.forEach(p => {
-          const t = p.trim().replace(/^"|"$/g, '');
-          if (/^https?:\/\//i.test(t)) urls.push(t);
-        });
-      });
-      return urls;
-    }
-    await loadSheetJSFallback();
-    if (typeof XLSX === 'undefined') throw new Error('无法加载 xlsx 库');
-    const wb = XLSX.read(buf, { type: 'array' });
-    const urls = [];
-    wb.SheetNames.forEach(name => {
-      const sheet = wb.Sheets[name];
-      const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
-      rows.forEach(row => {
-        row.forEach(cell => {
-          const t = String(cell || '').trim();
-          if (/^https?:\/\//i.test(t)) urls.push(t);
-        });
-      });
-    });
-    return urls;
-  }
-
-  // ====== 导出 JSON / 新建搜索 ======
-  function exportJson() {
-    if (!state.results) { alert('暂无结果'); return; }
-    const dataStr = JSON.stringify(state.results, null, 2);
-    const blob = new Blob([dataStr], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `1688-results-${Date.now()}.json`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  function newSearch() {
-    if (!confirm('新建搜索将清空当前结果, 是否继续?')) return;
-    if (el.resultSection) el.resultSection.hidden = true;
-    state.results = null;
-    state.tableLinks = [];
+  async function newSearch() {
+    await cleanupCurrentTask();
     state.files = [];
-    if (el.fileGrid) el.fileGrid.innerHTML = '';
-    if (el.urlTextarea) el.urlTextarea.value = '';
-    if (el.tableUrlTextarea) el.tableUrlTextarea.value = '';
-    if (el.fileList) el.fileList.style.display = 'none';
-    if (el.tableFileInfo) el.tableFileInfo.hidden = true;
-    if (el.urlPreview) el.urlPreview.style.display = 'none';
-    if (el.progressSection) el.progressSection.style.display = 'none';
-    if (el.timingVal) el.timingVal.textContent = '0';
-    if (el.timing) el.timing.hidden = true;
-    updateButtons();
+    state.urls = [];
+    state.tableUrls = [];
+    $('#urlTextarea').value = '';
+    $('#urlCount').textContent = '0 条';
+    $('#urlPreview').hidden = true;
+    $('#urlGrid').innerHTML = '';
+    $('#tableFileInput').value = '';
+    $('#tableFileInfo').hidden = true;
+    $('#tableUrlTextarea').value = '';
+    $('#tableUrlCount').textContent = '0 条链接';
+    $('#tablePreview').hidden = true;
+    $('#tableGrid').innerHTML = '';
+    renderFileList();
+    $('#uploadTiming').hidden = true;
+    $('#result-section').hidden = true;
+    $('#progress-section').hidden = true;
+    state.isSearching = false;
+    updateSearchBtn();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
+  async function cleanupCurrentTask() {
+    if (!state.taskId) return;
+    try {
+      await cleanupOwnedTasksConfirmed([state.taskId]);
+    } catch (e) {
+      console.warn('cleanup current task failed:', e);
+    }
+  }
 
-  function checkConnection() {
-    // 异步 ping 后端
-    fetch(api('/api/health'), { method: 'GET' })
-      .then(r => {
-        if (r.ok) {
-          if (el.connectionStatus) {
-            el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">已连接</span>';
-          }
-        } else {
-          if (el.connectionStatus) {
-            el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">连接失败</span>';
-          }
-        }
-      })
-      .catch(() => {
-        if (el.connectionStatus) {
-          el.connectionStatus.innerHTML = '<span class="status-dot"></span><span class="status-text">离线</span>';
-        }
+  async function cancelCurrentTask() {
+    if (!state.taskId || !state.isSearching) return;
+    state.cancelRequested = true;
+    const btn = $('#cancelBtn');
+    btn.disabled = true;
+    btn.textContent = '⏳ 正在停止...';
+    $('#progressStatus').textContent = '⏳ 正在停止任务...';
+    try {
+      await fetch(`${state.apiBase}/api/tasks/${state.taskId}/cancel`, { method: 'POST' });
+    } catch (e) {
+      console.warn('cancel failed:', e);
+    }
+    // 后端主循环检测到 canceled 会跳出，polling 检测到 status=failed 后会自动收尾
+  }
+
+  function clearCurrentTab() {
+    if (state.activeTab === 'batch') {
+      if (state.files.length === 0) return;
+      state.files = [];
+      state.fileRenderCount = 0;
+      renderFileList();
+    } else if (state.activeTab === 'link') {
+      if (state.urls.length === 0) return;
+      state.urls = [];
+      $('#urlTextarea').value = '';
+      $('#urlCount').textContent = '0 条';
+      $('#urlPreview').hidden = true;
+      $('#urlGrid').innerHTML = '';
+    } else if (state.activeTab === 'table') {
+      if ((state.tableUrls || []).length === 0) return;
+      state.tableUrls = [];
+      $('#tableFileInput').value = '';
+      $('#tableFileInfo').hidden = true;
+      $('#tablePreview').hidden = true;
+      $('#tableUrlTextarea').value = '';
+      $('#tableUrlCount').textContent = '0 条链接';
+      $('#tableGrid').innerHTML = '';
+    }
+    updateSearchBtn();
+  }
+
+  // ============== Task History ==============
+  async function loadTaskHistory() {
+    const list = $('#historyList');
+    try {
+      const res = await fetch(`${state.apiBase}/api/tasks`);
+      const json = await res.json();
+      const tasks = json.tasks || [];
+      if (!tasks.length) { list.innerHTML = '<span class="muted">暂无历史任务</span>'; return; }
+      list.innerHTML = '';
+      tasks.slice(0, 30).forEach((task) => {
+        const statusText = { completed: '已完成', partial: '部分完成', failed: '失败', searching: '搜索中', downloading: '下载中', queued: '等待中' }[task.status] || task.status;
+        const row = h('div', { className: 'history-item' }, [
+          h('div', { className: 'history-info' }, [
+            h('strong', {}, task.taskId),
+            h('span', { className: `status-badge status-${task.status}` }, statusText),
+            h('span', { className: 'muted' }, `${task.searchedCount || task.current || 0}/${task.total || 0}`),
+          ]),
+          h('div', { className: 'history-actions' }, [
+            h('button', { className: 'btn btn-ghost btn-sm', onclick: () => openHistoryTask(task.taskId) }, '查看结果'),
+            h('button', { className: 'btn btn-outline btn-sm', onclick: () => resumeHistoryTask(task.taskId, false) }, '继续任务'),
+            h('button', { className: 'btn btn-outline btn-sm', onclick: () => resumeHistoryTask(task.taskId, true) }, '重试失败'),
+            h('button', { className: 'btn btn-ghost btn-sm', onclick: () => deleteHistoryTask(task.taskId) }, '删除'),
+          ]),
+        ]);
+        list.appendChild(row);
       });
+    } catch (e) { list.innerHTML = `<span class="muted">任务记录加载失败：${e.message}</span>`; }
   }
 
-  // ====== 启动 ======
-  function closeResultModal() {
-    if (!el.resultModal) return;
-    el.resultModal.hidden = true;
-    el.resultModal.style.display = 'none';
-    document.body.style.overflow = '';
+  async function openHistoryTask(taskId) {
+    state.taskId = taskId;
+    await loadResults();
   }
 
-  function setupHistory() {
-    if (el.refreshHistoryBtn) el.refreshHistoryBtn.addEventListener('click', renderHistory);
-    renderHistory();
+  async function resumeHistoryTask(taskId, failedOnly) {
+    state.taskId = taskId;
+    const endpoint = failedOnly ? `/api/tasks/${taskId}/retry-failed` : `/api/search/${taskId}`;
+    const res = await fetch(`${state.apiBase}${endpoint}`, { method: 'POST' });
+    const json = await res.json();
+    if (!res.ok) { alert(json.error || '任务启动失败'); return; }
+    registerOwnedTask(taskId);
+    state.isSearching = true;
+    $('#progress-section').hidden = false;
+    startPolling();
   }
 
-  function renderHistory() {
-    if (!el.historyList) return;
-    let raw;
-    try { raw = JSON.parse(localStorage.getItem('taskHistory') || '[]'); }
-    catch (e) { raw = []; }
-    if (!raw || raw.length === 0) {
-      el.historyList.innerHTML = '<div class="history-empty">暂无任务记录</div>';
-      return;
-    }
-    const items = raw.slice().reverse().slice(0, 20);
-    el.historyList.innerHTML = items.map(t => {
-      const status = t.status || 'completed';
-      const statusText = status === 'completed' ? '已完成' : (status === 'failed' ? '失败' : status);
-      const time = new Date(t.created_at || t.time || Date.now()).toLocaleString('zh-CN');
-      const safeId = String(t.task_id || '任务').replace(/&/g, '&amp;').replace(/</g, '&lt;');
-      return `<div class="history-item" data-task="${safeId}">
-        <span class="history-item-icon">${status === 'failed' ? '⚠' : '✓'}</span>
-        <div class="history-item-info">
-          <span class="history-item-title">${safeId} · ${t.total || 0} 张</span>
-          <span class="history-item-time">${time}</span>
-        </div>
-        <span class="history-item-status ${status}">${statusText}</span>
-      </div>`;
-    }).join('');
+  async function deleteHistoryTask(taskId) {
+    if (!confirm('删除该任务？图片和搜索结果会从磁盘清除，不可恢复。')) return;
+    try {
+      const res = await fetch(`${state.apiBase}/api/cleanup/${taskId}`, { method: 'POST' });
+      if (!res.ok) throw new Error(`cleanup_failed_${res.status}`);
+      forgetOwnedTasks([taskId]);
+      loadTaskHistory();
+    } catch (e) { alert('删除失败：' + e.message); }
   }
 
-  function setupSettings() {
-    if (el.settingsSave) el.settingsSave.addEventListener('click', saveSettings);
-    if (el.settingsCancel) el.settingsCancel.addEventListener('click', closeSettings);
-    if (el.settingsClose) el.settingsClose.addEventListener('click', closeSettings);
-    if (el.settingsOverlay) el.settingsOverlay.addEventListener('click', closeSettings);
-    if (el.settingsBtn) el.settingsBtn.addEventListener('click', openSettings);
-    if (el.apiBaseInput && !el.apiBaseInput.value) el.apiBaseInput.value = getApiBase();
-    if (!localStorage.getItem('apiBase')) {
-      localStorage.setItem('apiBase', DEFAULT_API_BASE);
-    }
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && el.settingsModal && el.settingsModal.hidden === false) {
-        closeSettings();
-      }
+  // ============== Lifecycle ==============
+  function persistPendingCleanupIds() {
+    localStorage.setItem(CLEANUP_STORAGE_KEY, JSON.stringify(Array.from(state.ownedTaskIds)));
+  }
+  function registerOwnedTask(taskId) {
+    if (!taskId) return;
+    state.ownedTaskIds.add(taskId);
+    persistPendingCleanupIds();
+  }
+  function forgetOwnedTasks(taskIds) {
+    taskIds.forEach((taskId) => state.ownedTaskIds.delete(taskId));
+    persistPendingCleanupIds();
+  }
+  async function cleanupOwnedTasksConfirmed(taskIds = Array.from(state.ownedTaskIds)) {
+    const ids = taskIds.filter(Boolean);
+    if (!ids.length) return true;
+    const res = await fetch(`${state.apiBase}/api/cleanup_batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ taskIds: ids }),
     });
+    if (!res.ok) throw new Error(`cleanup_failed_${res.status}`);
+    forgetOwnedTasks(ids);
+    return true;
+  }
+  function cleanupOwnedTasksBeacon() {
+    const ids = Array.from(state.ownedTaskIds);
+    if (!ids.length || !navigator.sendBeacon) return;
+    const body = new Blob([JSON.stringify({ taskIds: ids })], { type: 'text/plain;charset=UTF-8' });
+    navigator.sendBeacon(`${state.apiBase}/api/cleanup_batch`, body);
+  }
+  function setupLifecycle() {
+    // 退出时尽力发送 Beacon；不移除本地 ID，下次加载会再次确认删除。
+    window.addEventListener('pagehide', cleanupOwnedTasksBeacon);
+    window.addEventListener('beforeunload', cleanupOwnedTasksBeacon);
   }
 
-  function openSettings() {
-    if (!el.settingsModal) return;
-    el.apiBaseInput.value = getApiBase();
-    el.settingsModal.hidden = false;
-    el.settingsModal.style.display = 'flex';
-    checkConnection();
+  // ============== Init ==============
+  async function init() {
+    state.apiBase = getApiBase();
+    $('#apiBaseInput').value = state.apiBase;
+    setupBatchUpload();
+    setupUrlPanel();
+    setupTablePanel();
+    setupPagination();
+    setupSettings();
+    setupResultModal();
+    setupNotice();
+    setupLifecycle();
+    $$('.upload-tab').forEach((b) => on(b, 'click', () => switchTab(b.dataset.tab)));
+    on($('#searchBtn'), 'click', startSearch);
+    on($('#cancelBtn'), 'click', cancelCurrentTask);
+    on($('#clearBtn'), 'click', clearCurrentTab);
+    on($('#exportExcelBtn'), 'click', exportExcel);
+    on($('#newSearchBtn'), 'click', newSearch);
+    on($('#refreshHistoryBtn'), 'click', loadTaskHistory);
+    on($('#loadMoreFilesBtn'), 'click', () => { state.fileRenderCount += FILE_RENDER_BATCH; renderFileList(); });
+    state.fileRenderCount = FILE_RENDER_BATCH;
+    try { await cleanupOwnedTasksConfirmed(); } catch (e) { console.warn('startup cleanup failed:', e); }
+    loadTaskHistory();
+    // 默认使用线上后端，设置弹窗仍允许手动覆盖。
   }
 
-  function closeSettings() {
-    if (!el.settingsModal) return;
-    el.settingsModal.style.display = 'none';
-    el.settingsModal.hidden = true;
-  }
-
-  function saveSettings() {
-    const v = (el.apiBaseInput && el.apiBaseInput.value || '').trim();
-    if (v) localStorage.setItem('apiBase', v);
-    closeSettings();
-    if (typeof alert === 'function') alert('设置已保存');
-  }
-
-  // ====== 启动上传 ======
-  async function startLinkUpload(urls) {
-    if (!urls || urls.length === 0) return;
-    const CHUNK = 50;
-    const chunks = [];
-    for (let i = 0; i < urls.length; i += CHUNK) chunks.push(urls.slice(i, i + CHUNK));
-    let taskId = null;
-    for (let i = 0; i < chunks.length; i++) {
-      const r = await fetch(api('/api/upload_urls'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: chunks[i], offset: i * CHUNK }),
-      });
-      const j = await r.json();
-      if (!r.ok) throw new Error(j.error || '上传失败');
-      taskId = j.task_id || taskId;
-    }
-    return taskId;
-  }
-
-  async function startBatchUpload(files) {
-    const fd = new FormData();
-    for (const f of files) fd.append('files', f);
-    const r = await fetch(api('/api/upload'), { method: 'POST', body: fd });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || '上传失败');
-    return j.task_id;
-  }
-
-  function createFullProductCard(item) {
-    const card = document.createElement('div');
-    card.className = 'product-card';
-    const img = item.image || '';
-    const title = item.title || '暂无标题';
-    const shopUrl = item.win_port_url || item.shop_url || '#';
-    const metaParts = [];
-    if (item.quantity_begin) metaParts.push(`<span class="meta-item">${escapeHtml(item.quantity_begin)}</span>`);
-    if (item.sale_quantity) metaParts.push(`<span class="meta-item">📦 ${escapeHtml(item.sale_quantity)}</span>`);
-    if (item.booked_count) metaParts.push(`<span class="meta-item">📋 ${escapeHtml(item.booked_count)}</span>`);
-    if (item.city) metaParts.push(`<span class="meta-item">📍 ${escapeHtml(item.city)}</span>`);
-    if (item.shop_year) metaParts.push(`<span class="meta-item">🏪 ${escapeHtml(item.shop_year)}</span>`);
-    if (item.fenxiao_time_limit) metaParts.push(`<span class="meta-item">⏱ ${escapeHtml(item.fenxiao_time_limit)}</span>`);
-    const sim = item.similarity !== undefined && item.similarity !== null ? Number(item.similarity).toFixed(2) : '';
-    card.innerHTML = `
-      <div class="product-img">
-        ${sim ? `<div class="similarity-badge" style="background:#ff6a00;">${sim}</div>` : ''}
-        ${img ? `<img src="${escapeHtml(img)}" alt="${escapeHtml(title)}" loading="lazy" onerror="this.style.display='none';this.parentElement.classList.add('img-failed')">` : '<div class="mini-img-placeholder">无图</div>'}
-      </div>
-      <div class="product-body">
-        <a class="product-title" href="${escapeHtml(item.url || '#')}" target="_blank" rel="noopener">${escapeHtml(title)}</a>
-        <div class="product-price-row">
-          <span class="price-text">${formatPrice(item.price)}</span>
-          ${item.price_description ? `<span class="product-moq">${escapeHtml(item.price_description)}</span>` : ''}
-        </div>
-        ${metaParts.length ? `<div class="product-meta">${metaParts.join('')}</div>` : ''}
-        ${item.shop ? `<div class="product-shop-wrapper"><a class="product-shop" href="${escapeHtml(shopUrl)}" target="_blank" rel="noopener">${escapeHtml(item.shop)}</a></div>` : ''}
-      </div>
-    `;
-    return card;
-  }
-
-  function openResultModal(imageName, imageUrl, items, imageData) {
-    if (!el.resultModal || !el.resultModalGrid) return;
-    if (el.resultModalThumb) el.resultModalThumb.src = imageUrl || '';
-    if (el.resultModalTitle) el.resultModalTitle.textContent = imageName || '搜索结果';
-    const list = Array.isArray(items) ? items : ((imageData && imageData.results) || []);
-    if (el.resultModalSub) {
-      const totalSeconds = Number(imageData?.total_seconds || imageData?.search_time || imageData?.search_seconds || 0);
-      el.resultModalSub.textContent = `共 ${list.length} 个结果${totalSeconds ? ' · 总计 ' + totalSeconds.toFixed(1) + 's' : ''}`;
-    }
-    el.resultModalGrid.innerHTML = '';
-    const grid = document.createElement('div');
-    grid.className = 'product-grid';
-    list.forEach(item => grid.appendChild(createFullProductCard(item)));
-    el.resultModalGrid.appendChild(grid);
-    el.resultModal.hidden = false;
-    el.resultModal.style.display = 'flex';
-    document.body.style.overflow = 'hidden';
-  }
-
-  // ====== 启动 ======
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', init);
-  } else {
-    init();
-  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+  else init();
 })();
