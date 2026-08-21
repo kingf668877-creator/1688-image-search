@@ -315,7 +315,7 @@
 
       // 从所有文本中提取图片链接
       const urlRegex = /https?:\/\/[^\s"',;|}\]]+\.(?:jpg|jpeg|png|webp|gif|bmp|tiff?)(?:\?[^\s"',;|}\]]*)?/gi;
-      const matches = allTextMatch || [];
+      const matches = allText.match(urlRegex) || [];
       // 去重
       const unique = [...new Set(matches.map((u) => u.trim()))];
 
@@ -529,7 +529,7 @@
       $('#elapsedTime').textContent = fmtClock(sec);
     }, 1000);
     poll();
-    state.pollTimer = setInterval(poll, POLL_INTERVAL);
+    state.pollTimer = =Setinterval(poll, POLL_INTERVAL);
   }
   function stopPolling() {
     if (state.pollTimer) { clearInterval(state.pollTimer); state.pollTimer = null; }
@@ -733,7 +733,7 @@
     if (item.rating) meta.appendChild(h('span', { class: 'mini-meta-item' }, `⭐ ${item.rating}`));
     if (item.reviews) meta.appendChild(h('span', { class: 'mini-meta-item' }, `💬 ${item.reviews}`));
 
-    // 店铺 + 城市 + 年限
+    // 店铺 + 城市 + 年限（span + JS 跳转，避免 <a> 嵌套）
     const shopBlock = node.querySelector('.mini-shop-block');
     const shopLink = node.querySelector('.mini-shop-link');
     const shopMetaEl = node.querySelector('.mini-shop-meta');
@@ -742,11 +742,15 @@
         const url = item.win_port_url || item.shop_url || '#';
         shopLink.textContent = item.shop;
         if (url && url !== '#') {
-          shopLink.href = url;
-          shopLink.target = '_blank';
-          shopLink.rel = 'noopener';
+          shopLink.style.cursor = 'pointer';
+          shopLink.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            window.open(url, '_blank', 'noopener');
+          };
         } else {
-          shopLink.removeAttribute('href');
+          shopLink.onclick = null;
+          shopLink.style.cursor = '';
         }
         const metaParts = [];
         if (item.city) metaParts.push(`<span class="mini-shop-city">📍 ${item.city}</span>`);
@@ -755,6 +759,7 @@
         shopBlock.style.display = '';
       } else {
         shopBlock.style.display = 'none';
+        if (shopLink) shopLink.onclick = null;
       }
     }
 
@@ -792,7 +797,7 @@
       salesRow.style.display = parts.length ? '' : 'none';
     }
 
-    // 店铺
+    // 店铺（span + JS 跳转，避免 <a> 嵌套）
     const shopBlock = node.querySelector('.product-shop-block');
     const shopLink = node.querySelector('.product-shop-link');
     const shopMetaEl = node.querySelector('.product-shop-meta');
@@ -801,11 +806,15 @@
         const url = item.win_port_url || item.shop_url || '#';
         shopLink.textContent = item.shop;
         if (url && url !== '#') {
-          shopLink.href = url;
-          shopLink.target = '_blank';
-          shopLink.rel = 'noopener';
+          shopLink.style.cursor = 'pointer';
+          shopLink.onclick = (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            window.open(url, '_blank', 'noopener');
+          };
         } else {
-          shopLink.removeAttribute('href');
+          shopLink.onclick = null;
+          shopLink.style.cursor = '';
         }
         const metaParts = [];
         if (item.city) metaParts.push(`<span class="product-shop-city">📍 ${item.city}</span>`);
@@ -814,6 +823,7 @@
         shopBlock.style.display = '';
       } else {
         shopBlock.style.display = 'none';
+        if (shopLink) shopLink.onclick = null;
       }
     }
 
