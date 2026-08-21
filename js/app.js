@@ -659,16 +659,14 @@
       const miniWrap = h('div', { class: 'result-mini-cards' });
       items.slice(0, 5).forEach((it, i) => miniWrap.appendChild(buildMiniCard(it, i + 1)));
       row.appendChild(miniWrap);
-      const moreWrap = h('div', { class: 'result-more' });
+      // 只在结果数 > 5 时显示「查看更多」按钮；不再额外渲染「查看全部」以避免重复入口。
       if (items.length > 5) {
-        const btn = h('button', { class: 'btn-view-more' }, `查看更多 +${items.length - 5}`);
+        const moreWrap = h('div', { class: 'result-more' });
+        const btn = h('button', { class: 'btn-view-more', type: 'button' }, `查看更多 +${items.length - 5}`);
         on(btn, 'click', () => openResultModal(imgName, entry));
         moreWrap.appendChild(btn);
+        row.appendChild(moreWrap);
       }
-      const btnAll = h('button', { class: 'btn-view-more' }, '查看全部');
-      on(btnAll, 'click', () => openResultModal(imgName, entry));
-      moreWrap.appendChild(btnAll);
-      row.appendChild(moreWrap);
       list.appendChild(row);
     });
     $('#paginationWrap').hidden = total <= pageSize;
@@ -897,17 +895,20 @@
       list.innerHTML = '';
       tasks.slice(0, 30).forEach((task) => {
         const statusText = { completed: '已完成', partial: '部分完成', failed: '失败', searching: '搜索中', downloading: '下载中', queued: '等待中' }[task.status] || task.status;
-        const row = h('div', { className: 'history-item' }, [
-          h('div', { className: 'history-info' }, [
-            h('strong', {}, task.taskId),
-            h('span', { className: `status-badge status-${task.status}` }, statusText),
-            h('span', { className: 'muted' }, `${task.searchedCount || task.current || 0}/${task.total || 0}`),
+        const taskId = task.task_id || task.taskId;
+        const searched = task.searched_count ?? task.searchedCount ?? task.current ?? 0;
+        const total = task.total ?? task.total_images ?? 0;
+        const row = h('div', { class: 'history-item' }, [
+          h('div', { class: 'history-info' }, [
+            h('strong', {}, taskId),
+            h('span', { class: `status-badge status-${task.status}` }, statusText),
+            h('span', { class: 'muted' }, `${searched}/${total}`),
           ]),
-          h('div', { className: 'history-actions' }, [
-            h('button', { className: 'btn btn-ghost btn-sm', onclick: () => openHistoryTask(task.taskId) }, '查看结果'),
-            h('button', { className: 'btn btn-outline btn-sm', onclick: () => resumeHistoryTask(task.taskId, false) }, '继续任务'),
-            h('button', { className: 'btn btn-outline btn-sm', onclick: () => resumeHistoryTask(task.taskId, true) }, '重试失败'),
-            h('button', { className: 'btn btn-ghost btn-sm', onclick: () => deleteHistoryTask(task.taskId) }, '删除'),
+          h('div', { class: 'history-actions' }, [
+            h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => openHistoryTask(taskId) }, '查看结果'),
+            h('button', { class: 'btn btn-outline btn-sm', type: 'button', onclick: () => resumeHistoryTask(taskId, false) }, '继续任务'),
+            h('button', { class: 'btn btn-outline btn-sm', type: 'button', onclick: () => resumeHistoryTask(taskId, true) }, '重试失败'),
+            h('button', { class: 'btn btn-ghost btn-sm', type: 'button', onclick: () => deleteHistoryTask(taskId) }, '删除'),
           ]),
         ]);
         list.appendChild(row);
