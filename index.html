@@ -1,23 +1,26 @@
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
-<title>1688 图搜批量寻源 - 以图搜款找货源</title>
-<link rel="stylesheet" href="css/style.css?v=20260820-ozon-sync-6">
-<link rel="icon" type="image/png" href="logo.png">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>1688 图搜批量寻源 · 以图搜款找货源</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23ff6a00'/%3E%3Ctext x='32' y='42' font-size='28' font-weight='800' font-family='Inter,sans-serif' fill='white' text-anchor='middle'%3E1%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="css/style.css?v=20260821a">
 </head>
 <body>
+  <!-- 背景装饰 -->
+  <div class="bg-decoration">
+    <div class="bg-circle bg-circle-1"></div>
+    <div class="bg-circle bg-circle-2"></div>
+    <div class="bg-grid"></div>
+  </div>
 
   <!-- 顶部导航 -->
   <header class="header">
     <div class="container header-inner">
       <div class="logo">
         <div class="logo-icon">
-          <svg viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="8" fill="#ff6a00"></rect><text x="16" y="22" font-size="18" font-weight="800" font-family="Inter,sans-serif" fill="white" text-anchor="middle">1</text></svg>
+          <svg viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="8" fill="#ff6a00"/><text x="16" y="22" font-size="16" font-weight="800" font-family="Inter,sans-serif" fill="white" text-anchor="middle">1</text></svg>
         </div>
         <div class="logo-text">
           <span class="logo-main">1688</span>
@@ -47,7 +50,7 @@
             <button class="notice-close" id="noticeClose">×</button>
           </div>
           <div class="hero-stats">
-            <div class="hero-stat"><span class="stat-num">1000万+</span><span class="stat-label">1688 商品池</span></div>
+            <div class="hero-stat"><span class="stat-num">600万+</span><span class="stat-label">1688 商品池</span></div>
             <div class="hero-stat-divider"></div>
             <div class="hero-stat"><span class="stat-num">实时</span><span class="stat-label">官网数据</span></div>
             <div class="hero-stat-divider"></div>
@@ -66,26 +69,49 @@
 
           <div class="upload-tabs" id="uploadTabs">
             <button class="upload-tab active" data-tab="link">🔗 图片链接批量上传</button>
-            <button class="upload-tab" data-tab="batch">🖼图片批量上传</button>
+            <button class="upload-tab" data-tab="batch">🖼️ 图片批量上传</button>
             <button class="upload-tab" data-tab="table">📋 表格批量上传</button>
           </div>
 
-          <!-- 链接面板 (默认激活) -->
+          <!-- 批量上传面板 -->
+          <div class="upload-panel" id="panel-batch">
+            <div class="drop-zone" id="dropZone">
+              <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
+                <path d="M32 8 L32 40 M20 28 L32 40 L44 28" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M12 48 L12 54 L52 54 L52 48" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              <p class="drop-zone-title">拖拽图片到此处，或 <span class="drop-zone-link">点击选择文件</span></p>
+              <p class="drop-zone-sub">支持批量选择多张图片同时上传，不限数量</p>
+              <input type="file" id="fileInput" multiple accept="image/jpeg,image/png,image/webp" hidden>
+            </div>
+            <div class="file-list" id="fileList" hidden>
+              <div class="file-list-header">
+                <span class="file-list-title">已上传图片</span>
+                <span class="file-list-count" id="fileCount">0 张</span>
+              </div>
+              <div class="file-grid file-grid-scrollable" id="fileGrid"></div>
+              <div class="file-list-more" id="fileListMore" hidden>
+                <button class="btn btn-ghost btn-sm" id="loadMoreFilesBtn">加载更多（已显示 <span id="fileShown">0</span> / <span id="fileTotal">0</span>）</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- URL 面板 -->
           <div class="upload-panel active" id="panel-link">
             <p class="panel-hint">每行粘贴一个图片 URL 地址，支持 http/https 链接，不限数量</p>
-            <textarea id="urlTextarea" rows="8" placeholder="https://example.com/img1.png
+            <textarea id="urlTextarea" rows="8" placeholder="https://example.com/img1.jpg
 https://example.com/img2.png
 https://example.com/img3.webp
 ..."></textarea>
             <div class="link-actions">
               <label class="btn btn-ghost btn-sm">
                 📄 从文本文件导入
-                <input type="file" id="urlFileInput" accept=".txt,.csv" hidden="">
+                <input type="file" id="urlFileInput" accept=".txt,.csv" hidden>
               </label>
               <button class="btn btn-ghost btn-sm" id="clearUrlBtn">清空</button>
               <button class="btn btn-outline btn-sm" id="previewUrlBtn">预览链接</button>
             </div>
-            <div class="url-preview" id="urlPreview" hidden="">
+            <div class="url-preview" id="urlPreview" hidden>
               <div class="file-list-header">
                 <span class="file-list-title">链接预览</span>
                 <span class="file-list-count" id="urlCount">0 条</span>
@@ -94,53 +120,30 @@ https://example.com/img3.webp
             </div>
           </div>
 
-          <!-- 批量上传面板 -->
-          <div class="upload-panel" id="panel-batch">
-            <div class="drop-zone" id="dropZone">
-              <svg viewBox="0 0 64 64" width="64" height="64" aria-hidden="true">
-                <path d="M32 8 L32 40 M20 28 L32 40 L44 28" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
-                <path d="M12 48 L12 54 L52 54 L52 48" stroke="currentColor" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"></path>
-              </svg>
-              <p class="drop-zone-title">拖拽图片到此处，或 <span class="drop-zone-link">点击选择文件</span></p>
-              <p class="drop-zone-sub">支持批量选择多张图片同时上传，不限数量</p>
-              <input type="file" id="fileInput" multiple="" accept="image/jpeg,image/png,image/webp" hidden="">
-            </div>
-            <div class="file-list" id="fileList" hidden="">
-              <div class="file-list-header">
-                <span class="file-list-title">已上传图片</span>
-                <span class="file-list-count" id="fileCount">0 张</span>
-              </div>
-              <div class="file-grid file-grid-scrollable" id="fileGrid"></div>
-              <div class="file-list-more" id="fileListMore" hidden="">
-                <button class="btn btn-ghost btn-sm" id="loadMoreFilesBtn">加载更多（已显示 <span id="fileShown">0</span> / <span id="fileTotal">0</span>）</button>
-              </div>
-            </div>
-          </div>
-
           <!-- 表格面板 -->
           <div class="upload-panel" id="panel-table">
             <p class="panel-hint">上传 Excel (.xlsx/.xls) 或 CSV 文件，自动识别表格中的图片链接</p>
             <div class="drop-zone" id="tableDropZone">
               <svg viewBox="0 0 64 64" width="48" height="48" aria-hidden="true">
-                <path d="M16 8 L40 8 L52 20 L52 56 L16 56 Z" stroke="currentColor" stroke-width="3" fill="none" stroke-linejoin="round"></path>
-                <path d="M40 8 L40 20 L52 20" stroke="currentColor" stroke-width="3" fill="none" stroke-linejoin="round"></path>
-                <path d="M24 32 L44 32 M24 40 L44 40 M24 48 L36 48" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"></path>
+                <path d="M16 8 L40 8 L52 20 L52 56 L16 56 Z" stroke="currentColor" stroke-width="3" fill="none" stroke-linejoin="round"/>
+                <path d="M40 8 L40 20 L52 20" stroke="currentColor" stroke-width="3" fill="none" stroke-linejoin="round"/>
+                <path d="M24 32 L44 32 M24 40 L44 40 M24 48 L36 48" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
               </svg>
               <p class="drop-zone-title">拖拽表格文件到此处，或 <span class="drop-zone-link">点击选择文件</span></p>
               <p class="drop-zone-sub">支持 .xlsx / .xls / .csv 格式</p>
-              <input type="file" id="tableFileInput" accept=".xlsx,.xls,.csv" hidden="">
+              <input type="file" id="tableFileInput" accept=".xlsx,.xls,.csv" hidden>
             </div>
-            <div class="table-file-info" id="tableFileInfo" hidden="">
+            <div class="table-file-info" id="tableFileInfo" hidden>
               <div class="file-list-header">
                 <span class="file-list-title" id="tableFileName">文件名</span>
                 <span class="file-list-count" id="tableUrlCount">0 条链接</span>
                 <button class="btn btn-outline btn-sm" id="previewTableBtn" style="margin-left:8px">预览链接</button>
                 <button class="btn btn-danger btn-sm" id="clearTableBtn" style="margin-left:auto">🗑 移除文件</button>
               </div>
-              <textarea id="tableUrlTextarea" rows="6" placeholder="识别到的图片链接将显示在这里..." style="margin-top:8px;width:100%;border:1px solid #e0e0e6;border-radius:8px;padding:10px 12px;font-size:13px;font-family:'SFMono-Regular',Consolas,Menlo,monospace;resize:vertical"></textarea>
+              <textarea id="tableUrlTextarea" rows="6" placeholder="识别到的图片链接将显示在这里..." style="margin-top:8px;width:100%;border:1px solid #e0e0e6;border-radius:8px;padding:8px;font-size:13px;font-family:inherit;resize:vertical" readonly></textarea>
               <p class="panel-hint" style="margin-top:6px;font-size:12px;color:#a0a0b0">可手动编辑上方文本框中的链接，编辑后点击刷新按钮更新</p>
               <button class="btn btn-outline btn-sm" id="refreshTableUrlsBtn" style="margin-top:6px">🔄 刷新链接列表</button>
-              <div class="url-preview" id="tablePreview" hidden="" style="margin-top:12px">
+              <div class="url-preview" id="tablePreview" hidden style="margin-top:12px">
                 <div class="file-list-header">
                   <span class="file-list-title">链接预览</span>
                 </div>
@@ -150,127 +153,134 @@ https://example.com/img3.webp
           </div>
 
           <div class="upload-actions">
-            <button class="btn btn-ghost" id="clearBtn" hidden="">🗑 清空图片</button>
-            <button class="btn btn-primary" id="searchBtn" disabled="">🔍 开始批量搜索</button>
+            <button class="btn btn-ghost" id="clearBtn" hidden>🗑 清空图片</button>
+            <button class="btn btn-primary" id="searchBtn" disabled>🔍 开始批量搜索</button>
           </div>
-          <div class="upload-timing" id="uploadTiming" hidden="">⏱️ 接口耗时：<span id="timingVal">0</span> 秒</div>
+          <div class="upload-timing" id="uploadTiming" hidden>⏱️ 接口耗时：<span id="timingVal">0</span> 秒</div>
         </div>
       </section>
 
-      <!-- 任务记录 -->
       <section class="history-section" id="history-section">
         <div class="card history-card">
           <div class="card-header">
             <h2 class="card-title">任务记录</h2>
             <button class="btn btn-ghost btn-sm" id="refreshHistoryBtn">刷新</button>
           </div>
-          <div class="history-list" id="historyList">
-            <div class="history-empty" id="historyEmpty">暂无任务记录</div>
-          </div>
+          <div class="history-list" id="historyList"><span class="muted">正在读取任务记录...</span></div>
         </div>
       </section>
 
-      <!-- 进度 -->
-      <section class="progress-section" id="progress-section" hidden="">
+      <!-- 进度卡片 -->
+      <section class="progress-section" id="progress-section" hidden>
         <div class="card progress-card">
           <div class="card-header">
             <h2 class="card-title">⏳ 搜索进度</h2>
             <div class="progress-header-right">
               <span class="progress-status" id="progressStatus">准备中...</span>
-              <button class="btn btn-danger btn-sm" id="cancelBtn" hidden="">⏹ 停止任务</button>
+              <button class="btn btn-danger btn-sm" id="cancelBtn" hidden>⏹ 停止任务</button>
             </div>
           </div>
           <div class="progress-bar-wrap">
             <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
             <div class="progress-text"><span id="progressCurrent">0</span> / <span id="progressTotal">0</span> · <span id="progressPercent">0%</span></div>
           </div>
-          <div class="progress-detail">
-            <div class="progress-detail-item"><span class="detail-label">已找到商品</span><span class="detail-value" id="foundProducts">0</span></div>
-            <div class="progress-detail-item"><span class="detail-label">已用时间</span><span class="detail-value" id="elapsedTime">0s</span></div>
-            <div class="progress-detail-item"><span class="detail-label">预计剩余</span><span class="detail-value" id="estimatedTime">-</span></div>
+          <div class="stage-progress-grid">
+            <div class="stage-progress-item">
+              <div class="stage-progress-head"><span>下载图片</span><span id="downloadProgressText">0 / 0 · 0%</span></div>
+              <div class="progress-bar stage-progress-bar"><div class="progress-fill download-progress-fill" id="downloadProgressFill"></div></div>
+            </div>
+            <div class="stage-progress-item">
+              <div class="stage-progress-head"><span>图搜图片</span><span id="searchProgressText">0 / 0 · 0%</span></div>
+              <div class="progress-bar stage-progress-bar"><div class="progress-fill search-progress-fill" id="searchProgressFill"></div></div>
+            </div>
           </div>
-          <div class="progress-tip">💡 搜索过程中请勿关闭页面，本地后端会驱动 1688 图像搜索接口</div>
+          <div class="progress-detail">
+            <div class="progress-detail-item"><span class="detail-label">搜索进度</span><span class="detail-val" id="currentImage">-</span></div>
+            <div class="progress-detail-item"><span class="detail-label">已找到商品</span><span class="detail-val highlight" id="foundProducts">0</span></div>
+            <div class="progress-detail-item"><span class="detail-label">已用时间</span><span class="detail-val" id="elapsedTime">00:00</span></div>
+            <div class="progress-detail-item"><span class="detail-label">预计剩余</span><span class="detail-val" id="estimatedTime">-</span></div>
+          </div>
+          <div class="image-status-section" id="imageStatusSection" hidden>
+            <div class="image-status-header">
+              <span>图片处理状态</span>
+              <span id="imageStatusSummary"></span>
+            </div>
+            <div class="image-status-list" id="imageStatusList"></div>
+          </div>
+          <div class="progress-tip">💡 搜索过程中请勿关闭页面，本地后端会启动浏览器自动化调用 1688 官网图搜接口</div>
         </div>
       </section>
 
       <!-- 结果区 -->
-      <section class="result-section" id="result-section" hidden="">
+      <section class="result-section" id="result-section" hidden>
         <div class="result-header">
           <div class="result-title-wrap">
             <h2 class="result-title">📊 搜索结果</h2>
             <p class="result-subtitle" id="resultSubtitle">共搜索 0 张图片，找到 0 个商品</p>
           </div>
           <div class="result-actions">
-            <button class="btn btn-ghost" id="exportJsonBtn">导出 JSON</button>
             <button class="btn btn-ghost" id="exportExcelBtn">导出 Excel</button>
             <button class="btn btn-outline" id="newSearchBtn">新建搜索</button>
           </div>
         </div>
         <div class="stats-row" id="statsRow"></div>
-
-        <!-- 顶部工具栏式分页（1688 原生风格） -->
-        <div class="pagination-wrap" id="paginationWrap">
-          <div class="pagination">
-            <button class="btn btn-sm btn-ghost" id="pageFirst">首页</button>
-            <button class="btn btn-sm btn-ghost" id="pagePrev">上一页</button>
-            <div class="page-numbers" id="pageNumbers"></div>
-            <button class="btn btn-sm btn-ghost" id="pageNext">下一页</button>
-            <button class="btn btn-sm btn-ghost" id="pageLast">末页</button>
-            <span class="page-size">每页
-              <select id="pageSizeSelect">
-                <option value="10">10</option>
-                <option value="20" selected="">20</option>
-                <option value="50">50</option>
-              </select> 张
-            </span>
+        <div class="result-list" id="resultList"></div>
+        <div class="pagination-wrap" id="paginationWrap" hidden>
+          <div class="pagination-info"><span id="paginationInfo">第 1-0 条，共 0 条</span></div>
+          <div class="pagination-controls">
+            <button class="page-btn" id="pageFirst" aria-label="首页">«</button>
+            <button class="page-btn" id="pagePrev" aria-label="上一页">‹</button>
+            <span class="page-current"><span id="pageCurrentNum">1</span> / <span id="pageTotalNum">1</span></span>
+            <button class="page-btn" id="pageNext" aria-label="下一页">›</button>
+            <button class="page-btn" id="pageLast" aria-label="末页">»</button>
             <span class="page-jump">跳转 <input type="number" id="pageJumpInput" min="1"> <button class="btn btn-sm btn-ghost" id="pageJumpBtn">Go</button></span>
+            <select class="page-size-select" id="pageSizeSelect">
+              <option value="10">10 条/页</option>
+              <option value="20">20 条/页</option>
+              <option value="50" selected>50 条/页</option>
+              <option value="100">100 条/页</option>
+            </select>
           </div>
         </div>
-
-        <div class="result-list" id="resultList"></div>
       </section>
-
     </div>
   </main>
 
-  <!-- Footer -->
+  <!-- 页脚 -->
   <footer class="footer">
-    <div class="container footer-inner">
+    <div class="container">
       <div class="footer-brand">
         <div class="logo">
           <div class="logo-icon">
-            <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="8" fill="#ff6a00"></rect><text x="16" y="22" font-size="18" font-weight="800" font-family="Inter,sans-serif" fill="white" text-anchor="middle">1</text></svg>
+            <svg viewBox="0 0 32 32" width="28" height="28"><rect width="32" height="32" rx="8" fill="#ff6a00"/><text x="16" y="22" font-size="16" font-weight="800" font-family="Inter,sans-serif" fill="white" text-anchor="middle">1</text></svg>
           </div>
           <div class="logo-text"><span class="logo-main">1688</span><span class="logo-accent">图搜</span></div>
         </div>
-        <p class="footer-tagline">批量图搜找货源，助力电商选品</p>
       </div>
       <div class="footer-bottom">
-        <p>数据来源：1688.com · 仅供选品参考</p>
       </div>
     </div>
   </footer>
 
-  <!-- Settings modal -->
-  <div class="settings-modal" id="settingsModal" hidden="">
+  <!-- 设置弹窗 -->
+  <div class="settings-modal" id="settingsModal" hidden>
     <div class="settings-overlay" id="settingsOverlay"></div>
     <div class="settings-panel">
       <div class="settings-header">
-        <h3>系统设置</h3>
+        <h3>后端设置</h3>
         <button class="settings-close" id="settingsClose">×</button>
       </div>
       <div class="settings-body">
-        <div class="settings-row">
-          <label>后端地址</label>
-          <input type="text" id="apiBaseInput" placeholder="http://127.0.0.1:5000">
+        <div class="form-group">
+          <label>后端 API 地址</label>
+          <input type="text" id="apiBaseInput" placeholder="https://yidong.dianleida.net:22000">
+          <p class="form-hint" id="apiHint">默认线上后端：https://yidong.dianleida.net:22000</p>
         </div>
-        <div class="settings-row">
-          <label>每页大小</label>
-          <input type="number" id="defaultPageSizeInput" value="20" min="10" max="100">
-        </div>
-        <div class="settings-row">
-          <label>相似度阈值</label>
-          <input type="number" id="similarityInput" value="0.6" step="0.05" min="0" max="1">
+        <div class="form-group">
+          <label>连接状态</label>
+          <div class="connection-status" id="connectionStatus">
+            <span class="status-dot"></span><span class="status-text">未检测</span>
+          </div>
         </div>
       </div>
       <div class="settings-footer">
@@ -280,27 +290,57 @@ https://example.com/img3.webp
     </div>
   </div>
 
-  <!-- Result modal -->
-  <div class="result-modal" id="resultModal" hidden="">
+  <!-- 商品结果弹窗 -->
+  <div class="result-modal" id="resultModal" hidden>
     <div class="result-modal-overlay" id="resultModalOverlay"></div>
     <div class="result-modal-panel">
       <div class="result-modal-header">
         <div class="result-modal-title-wrap">
           <img class="result-modal-thumb" id="resultModalThumb" alt="">
           <div>
-            <h3 class="result-modal-title" id="resultModalTitle"></h3>
+            <h3 id="resultModalTitle">商品</h3>
             <p class="result-modal-sub" id="resultModalSub"></p>
           </div>
         </div>
         <button class="result-modal-close" id="resultModalClose">×</button>
       </div>
-      <div class="result-modal-body" id="resultModalBody">
+      <div class="result-modal-body">
         <div class="product-grid" id="resultModalGrid"></div>
       </div>
     </div>
   </div>
 
-<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
-<script src="js/app-ozon-sync-5.js?v=20260820-ozon-sync-6"></script>
+  <!-- 商品卡模板 -->
+  <template id="productCardTemplate">
+    <a class="product-card" href="#" target="_blank">
+      <div class="product-img">
+        <img loading="lazy" alt="" />
+      </div>
+      <div class="product-info">
+        <div class="product-title"></div>
+        <div class="product-price"></div>
+        <div class="product-meta"></div>
+      </div>
+      <div class="similarity-bar"><div class="similarity-fill"></div></div>
+    </a>
+  </template>
+
+  <!-- 迷你商品卡模板 -->
+  <template id="miniCardTemplate">
+    <a class="mini-card" href="#" target="_blank">
+      <div class="mini-img">
+        <img loading="lazy" alt="" />
+        <span class="mini-rank"></span>
+      </div>
+      <div class="mini-info">
+        <div class="mini-title"></div>
+        <div class="mini-price"></div>
+        <div class="mini-meta"></div>
+      </div>
+    </a>
+  </template>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="js/app.js?v=20260821a"></script>
 </body>
 </html>
