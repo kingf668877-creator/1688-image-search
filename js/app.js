@@ -945,6 +945,10 @@
 
   async function imageBlobToDataUrl(url) {
     if (!url) return null;
+    if (url.startsWith('data:image/')) {
+      const mime = (url.match(/^data:([^;,]+)/) || [])[1] || 'image/png';
+      return { dataUrl: url, extension: mime.includes('png') ? 'png' : 'jpeg' };
+    }
     const res = await fetch(url);
     if (!res.ok) throw new Error(`图片请求失败：HTTP ${res.status}`);
     const blob = await res.blob();
@@ -1012,6 +1016,8 @@
         const item = bestMatchedProduct(entry);
         const imageName = entry.image_name || String(index + 1);
         const uploadUrl = `${state.apiBase}/uploads/${encodeURIComponent(state.taskId)}/${encodeURIComponent(imageName)}`;
+        const localUpload = state.files.find((file) => file.name === imageName) || state.files[index];
+        const uploadImageSource = localUpload?.dataUrl || uploadUrl;
         const productImageUrl = item.image || '';
         const shopUrl = item.win_port_url || item.shop_url || '';
         const row = sheet.addRow([
@@ -1035,7 +1041,7 @@
           if (cell.value) cell.value = { text: cell.value, hyperlink: cell.value };
         });
         if (btn) btn.textContent = `正在嵌入图片 ${index + 1}/${entries.length}...`;
-        await addExcelThumbnail(workbook, sheet, uploadUrl, uploadUrl, { tl: { col: 0.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
+        await addExcelThumbnail(workbook, sheet, uploadImageSource, uploadUrl, { tl: { col: 0.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
         const proxyUrl = productImageUrl ? `${state.apiBase}/img-proxy?url=${encodeURIComponent(productImageUrl)}` : '';
         await addExcelThumbnail(workbook, sheet, proxyUrl, productImageUrl, { tl: { col: 1.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
       }
