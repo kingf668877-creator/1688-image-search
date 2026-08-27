@@ -949,21 +949,33 @@
     if (!res.ok) throw new Error(`图片请求失败：HTTP ${res.status}`);
     const blob = await res.blob();
     if (!blob.type.startsWith('image/')) throw new Error('返回内容不是图片');
-    const extension = blob.type.includes('png') ? 'png' : 'jpeg';
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve({ dataUrl: reader.result, extension });
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
+    if (blob.type.includes('png') || blob.type.includes('jpeg') || blob.type.includes('jpg')) {
+      const extension = blob.type.includes('png') ? 'png' : 'jpeg';
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve({ dataUrl: reader.result, extension });
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+    }
+    const bitmap = await createImageBitmap(blob);
+    const canvas = document.createElement('canvas');
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    canvas.getContext('2d').drawImage(bitmap, 0, 0);
+    bitmap.close();
+    return { dataUrl: canvas.toDataURL('image/png'), extension: 'png' };
   }
 
-  async function addExcelThumbnail(workbook, worksheet, imageUrl, range) {
+  async function addExcelThumbnail(workbook, worksheet, imageUrl, originalUrl, range) {
     if (!imageUrl) return;
     try {
       const image = await imageBlobToDataUrl(imageUrl);
       const imageId = workbook.addImage({ base64: image.dataUrl, extension: image.extension });
-      worksheet.addImage(imageId, range);
+      worksheet.addImage(imageId, {
+        ...range,
+        hyperlinks: originalUrl ? { hyperlink: originalUrl, tooltip: '打开原图' } : undefined,
+      });
     } catch (e) {
       console.warn('Excel 图片嵌入失败：', imageUrl, e);
     }
@@ -1023,9 +1035,9 @@
           if (cell.value) cell.value = { text: cell.value, hyperlink: cell.value };
         });
         if (btn) btn.textContent = `正在嵌入图片 ${index + 1}/${entries.length}...`;
-        await addExcelThumbnail(workbook, sheet, uploadUrl, { tl: { col: 0.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
+        await addExcelThumbnail(workbook, sheet, uploadUrl, uploadUrl, { tl: { col: 0.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
         const proxyUrl = productImageUrl ? `${state.apiBase}/img-proxy?url=${encodeURIComponent(productImageUrl)}` : '';
-        await addExcelThumbnail(workbook, sheet, proxyUrl, { tl: { col: 1.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
+        await addExcelThumbnail(workbook, sheet, proxyUrl, productImageUrl, { tl: { col: 1.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
       }
 
       if (btn) btn.textContent = '正在生成文件...';
