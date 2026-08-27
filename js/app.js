@@ -918,23 +918,126 @@
   }
 
   // ============== Export / New ==============
+  async function fetchAllResultEntries() {
+    const entries = [];
+    const pageSize = 500;
+    let offset = 0;
+    while (true) {
+      const res = await fetchWithRetry(`${state.apiBase}/api/results/${encodeURIComponent(state.taskId)}?limit=${pageSize}&offset=${offset}`, {}, 1);
+      if (!res.ok) throw new Error(`获取结果失败：HTTP ${res.status}`);
+      const data = await res.json();
+      const batch = Object.values(data.results || {});
+      entries.push(...batch);
+      if (!data.has_more || batch.length === 0) break;
+      offset += batch.length;
+    }
+    return entries;
+  }
+
+  function bestMatchedProduct(entry) {
+    return (entry.results || []).slice().sort((a, b) => {
+      const rankA = Number(a.rank) || Number.MAX_SAFE_INTEGER;
+      const rankB = Number(b.rank) || Number.MAX_SAFE_INTEGER;
+      if (rankA !== rankB) return rankA - rankB;
+      return (Number(b.similarity) || 0) - (Number(a.similarity) || 0);
+    })[0] || {};
+  }
+
+  async function imageBlobToDataUrl(url) {
+    if (!url) return null;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`图片请求失败：HTTP ${res.status}`);
+    const blob = await res.blob();
+    if (!blob.type.startsWith('image/')) throw new Error('返回内容不是图片');
+    const extension = blob.type.includes('png') ? 'png' : 'jpeg';
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve({ dataUrl: reader.result, extension });
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function addExcelThumbnail(workbook, worksheet, imageUrl, range) {
+    if (!imageUrl) return;
+    try {
+      const image = await imageBlobToDataUrl(imageUrl);
+      const imageId = workbook.addImage({ base64: image.dataUrl, extension: image.extension });
+      worksheet.addImage(imageId, range);
+    } catch (e) {
+      console.warn('Excel 图片嵌入失败：', imageUrl, e);
+    }
+  }
+
   async function exportExcel() {
     if (!state.taskId) { alert('暂无可导出的任务'); return; }
+    if (!window.ExcelJS) { alert('导出组件未加载，请稍后刷新页面后重试'); return; }
     const btn = $('#exportExcelBtn');
-    if (btn) { btn.disabled = true; btn.textContent = '正在导出...'; }
+    if (btn) { btn.disabled = true; btn.textContent = '正在整理结果...'; }
     try {
-      const res = await fetch(`${state.apiBase}/api/export/${encodeURIComponent(state.taskId)}.xlsx`);
-      if (!res.ok) {
-        const body = await res.text().catch(() => '');
-        throw new Error(body || `HTTP ${res.status}`);
+      const entries = await fetchAllResultEntries();
+      const workbook = new ExcelJS.Workbook();
+      workbook.creator = '1688 图搜批量寻源';
+      workbook.created = new Date();
+      const sheet = workbook.addWorksheet('图搜结果', { views: [{ state: 'frozen', ySplit: 1 }] });
+      const columns = [
+        ['上传图片', 14], ['商品图片', 14], ['商品标题', 40], ['商品价格', 14], ['起批量', 14],
+        ['总件数', 14], ['总订单数', 14], ['诚信通年限', 14], ['店铺名称', 26], ['所在地', 18],
+        ['商品链接', 42], ['店铺链接', 42], ['上传图片链接', 54], ['商品主图链接', 54],
+      ];
+      sheet.columns = columns.map(([header, width]) => ({ header, width }));
+      const header = sheet.getRow(1);
+      header.height = 26;
+      header.eachCell((cell) => {
+        cell.font = { bold: true, color: { argb: 'FFFFFFFF' }, name: 'Arial' };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEF6C00' } };
+        cell.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true };
+        cell.border = { bottom: { style: 'thin', color: { argb: 'FFD9DEE7' } } };
+      });
+
+      for (let index = 0; index < entries.length; index += 1) {
+        const entry = entries[index];
+        const item = bestMatchedProduct(entry);
+        const imageName = entry.image_name || String(index + 1);
+        const uploadUrl = `${state.apiBase}/uploads/${encodeURIComponent(state.taskId)}/${encodeURIComponent(imageName)}`;
+        const productImageUrl = item.image || '';
+        const shopUrl = item.win_port_url || item.shop_url || '';
+        const row = sheet.addRow([
+          '', '', item.title || '', item.price || '', item.quantity_begin || '',
+          item.sale_quantity || '', item.booked_count || '', item.shop_year || '', item.shop || '', item.city || '',
+          item.url || '', shopUrl, uploadUrl, productImageUrl,
+        ]);
+        row.height = 62;
+        const rowNumber = row.number;
+        row.eachCell((cell, colNumber) => {
+          cell.font = { name: 'Arial', size: 10, color: { argb: 'FF1F2937' } };
+          cell.alignment = { vertical: 'middle', wrapText: true };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: index % 2 ? 'FFF7F9FC' : 'FFFFFFFF' } };
+          cell.border = { bottom: { style: 'thin', color: { argb: 'FFD9DEE7' } } };
+          if (colNumber >= 11) {
+            cell.font = { name: 'Arial', size: 10, color: { argb: 'FF0563C1' }, underline: 'single' };
+          }
+        });
+        [11, 12, 13, 14].forEach((col) => {
+          const cell = row.getCell(col);
+          if (cell.value) cell.value = { text: cell.value, hyperlink: cell.value };
+        });
+        if (btn) btn.textContent = `正在嵌入图片 ${index + 1}/${entries.length}...`;
+        await addExcelThumbnail(workbook, sheet, uploadUrl, { tl: { col: 0.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
+        const proxyUrl = productImageUrl ? `${state.apiBase}/img-proxy?url=${encodeURIComponent(productImageUrl)}` : '';
+        await addExcelThumbnail(workbook, sheet, proxyUrl, { tl: { col: 1.15, row: rowNumber - 0.85 }, ext: { width: 56, height: 56 } });
       }
-      const blob = await res.blob();
+
+      if (btn) btn.textContent = '正在生成文件...';
+      const buffer = await workbook.xlsx.writeBuffer();
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
       const url = URL.createObjectURL(blob);
-      const a = h('a', { href: url, download: `1688图搜结果_${state.taskId}.xlsx` });
+      const a = h('a', { href: url, download: `1688图搜首选匹配_${state.taskId}.xlsx` });
       document.body.appendChild(a); a.click(); a.remove();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      alert('Excel 导出失败：' + e.message);
+      console.error('Excel 导出失败：', e);
+      alert('Excel 导出失败：' + (e.message || '未知错误'));
     } finally {
       if (btn) { btn.disabled = false; btn.textContent = '导出 Excel'; }
     }
